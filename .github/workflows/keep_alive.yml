@@ -3,24 +3,54 @@ name: Keep Streamlit App Alive
 on:
   schedule:
     - cron: '0 */18 * * *'  # Runs every 18 hours
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
-  ping:
+  keep_alive:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium webdriver_manager
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
+      - name: Create and run browser script
+        run: |
+          cat > keep_alive.py << 'EOL'
+          from selenium import webdriver
+          from selenium.webdriver.chrome.service import Service
+          from selenium.webdriver.chrome.options import Options
+          from webdriver_manager.chrome import ChromeDriverManager
+          import time
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests
+          def visit_app():
+              chrome_options = Options()
+              chrome_options.add_argument('--headless')
+              chrome_options.add_argument('--no-sandbox')
+              chrome_options.add_argument('--disable-dev-shm-usage')
 
-    - name: Ping Streamlit app
-      run: |
-        python -c "import requests; requests.get('https://vibemusic.streamlit.app/')"
+              driver = webdriver.Chrome(
+                  service=Service(ChromeDriverManager().install()),
+                  options=chrome_options
+              )
+
+              try:
+                  print("Visiting app...")
+                  driver.get("https://vibemusic.streamlit.app/")
+                  time.sleep(10)  # Wait for app to load
+                  print("Page title:", driver.title)
+              finally:
+                  driver.quit()
+
+          if __name__ == "__main__":
+              visit_app()
+          EOL
+          
+          python keep_alive.py
