@@ -10,7 +10,7 @@ Vibe is a content-based music recommendation system with a dataset of over fifty
 
 ## Using the app
 
-Vibe is hosted and available online on [Streamlit](https://vibe-music.streamlit.app) and [Hugging Face](https://huggingface.co/spaces/Al3x-T/Vibe).
+Vibe is hosted and available online on [Streamlit](https://vibemusic.streamlit.app) and [Hugging Face](https://huggingface.co/spaces/Al3x-T/Vibe).
 
 To run the app locally, install the packages in requirements.txt and and run
 
