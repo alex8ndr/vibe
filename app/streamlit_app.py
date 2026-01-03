@@ -19,8 +19,12 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
-# Clean styling with brand colors (orange/gold/navy)
+# Clean styling and preconnect hints for faster embed loading
 st.markdown("""
+<link rel="preconnect" href="https://open.spotify.com">
+<link rel="preconnect" href="https://i.scdn.co">
+<link rel="dns-prefetch" href="https://open.spotify.com">
+<link rel="dns-prefetch" href="https://i.scdn.co">
 <style>
     /* Sidebar logo sizing */
     .sidebar-logo {
@@ -32,7 +36,7 @@ st.markdown("""
     /* Spotify embeds */
     .spotify-embed iframe {
         border-radius: 12px;
-        margin: 2px 0;
+        margin: 0px;
     }
     
     /* Tighter sidebar spacing */
@@ -218,7 +222,7 @@ def spotify_embed(track_id):
         <iframe src="https://open.spotify.com/embed/track/{track_id}"
             width="100%" height="80" frameborder="0"
             allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"></iframe>
+            loading="eager"></iframe>
     </div>'''
 
 
@@ -264,7 +268,9 @@ def main():
         st.session_state.last_params = None
 
     df = load_data()
-    artists_list = df['artist_name'].unique().tolist()  # Keep default order, no sorting
+    # Sort artists by popularity (most popular first)
+    artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
+    artists_list = artist_popularity.index.tolist()
 
     # Sidebar
     with st.sidebar:
@@ -278,7 +284,7 @@ def main():
         with st.expander("Settings", expanded=False):
             max_results = st.slider("Max artists", 1, 8, 4)
             diversity = st.slider("Diversity", 1, 5, 2, help="Higher = more variety")
-            columns = st.selectbox("Columns", ["Auto", 1, 2, 3], index=0)
+            columns = st.pills("Columns", ["Auto", "1", "2", "3"], default="Auto")
         
         st.markdown("#### Select Artists")
         selected_artists = st.multiselect(
@@ -364,7 +370,7 @@ def main():
         input_artists = st.session_state.last_params['artists'] if st.session_state.last_params else selected_artists
         st.download_button(
             "Download",
-            generate_html(input_artists, recs),
+            data=lambda: generate_html(input_artists, recs),
             file_name=f"vibe_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
             mime="text/html",
             use_container_width=True,
@@ -379,7 +385,7 @@ def main():
             embeds = "".join([spotify_embed(track_id) for track_id in songs])
             grid_items += f'<div class="auto-grid-card"><h3>{artist}</h3>{embeds}</div>'
         st.markdown(f'<div class="auto-grid">{grid_items}</div>', unsafe_allow_html=True)
-    elif columns == 1:
+    elif columns == "1":
         for artist, songs in recs.items():
             with st.container(border=True):
                 st.markdown(f"### {artist}")
