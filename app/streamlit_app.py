@@ -51,7 +51,7 @@ st.markdown("""
 
     /* Main block container padding */
     [data-testid="stMainBlockContainer"] {
-        padding-top: 3rem !important;
+        padding-top: 2rem !important;
         padding-bottom: 3rem !important;
     }
 
@@ -76,8 +76,8 @@ st.markdown("""
         padding: 0.75rem;
     }
     .auto-grid-card h3 {
-        margin: 0 0 0.5rem 0 !important;
-        font-size: 1.25rem !important;
+        margin: 0 0 0.25rem 0 !important;
+        font-size: 1.5rem !important;
     }
 
     /* Hide anchor links on headings */
@@ -113,6 +113,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Simple staggered embed loading
+st.html("""
+<script>
+(function() {
+    let pending = null;
+    function loadEmbeds() {
+        clearTimeout(pending);
+        pending = setTimeout(() => {
+            document.querySelectorAll('.spotify-embed iframe[data-src]:not([src])').forEach((el, i) => {
+                setTimeout(() => { el.src = el.dataset.src; }, i * 200);
+            });
+        }, 0);
+    }
+    new MutationObserver(loadEmbeds).observe(document.body, {childList: true, subtree: true});
+    loadEmbeds();
+})();
+</script>
+""", unsafe_allow_javascript=True)
 
 @st.cache_data(show_spinner="Loading...")
 def load_data():
@@ -219,10 +237,9 @@ def generate_recommendations(df, input_artists, features, diversity, max_artists
 
 def spotify_embed(track_id):
     return f'''<div class="spotify-embed">
-        <iframe src="https://open.spotify.com/embed/track/{track_id}"
+        <iframe data-src="https://open.spotify.com/embed/track/{track_id}"
             width="100%" height="80" frameborder="0"
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="eager"></iframe>
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>
     </div>'''
 
 
@@ -346,6 +363,8 @@ def main():
                 st.session_state.recommendations = recs
                 st.session_state.last_params = params
                 save_input_artists(selection_dict)
+                # Force a rerun to stabilize DOM before user interacts
+                st.rerun()
     
     recs = st.session_state.recommendations
     
