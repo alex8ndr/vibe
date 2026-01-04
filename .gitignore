@@ -1,2 +1,21 @@
-# ignore the secrets file
+# Secrets
 .secrets.toml
+secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

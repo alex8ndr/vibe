@@ -2,278 +2,424 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from scipy.spatial.distance import cdist
-import random
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
-
-# Print the songs from the given artist
-def print_songs_from_artist(artist_name):
-    print(df[df["artist_name"].str.lower() == artist_name.lower()][["track_name", "artist_name"]].values.tolist())
-
-# Get the average features of the given artist
-def get_features_by_artist(artist_name):
-    artist_features = df[df["artist_name"].str.lower() == artist_name.lower()].iloc[:, 3:].mean().values.reshape(1, -1)
-    return artist_features
-
-# Get the features of the given song
-def get_features_by_track_id(track_id):
-    features = df[df["track_id"] == track_id].iloc[:, 3:].values
-    return features
-
-# Get average features of the given songs
-def get_features_by_track_ids(track_ids):
-    #print(track_ids)
-    #features = df[df["track_id"].isin(track_ids)].iloc[:, 3:].values
-    features = df[df["track_id"].isin(track_ids)].iloc[:, 3:].mean().values.reshape(1, -1)
-    return features
-
-# Get average features of the given songs and artists
-def get_features_by_artists_and_track_ids(artists, track_ids):
-    artist_features = []
-    for artist in artists:
-        artist_features.append(get_features_by_artist(artist))
-    song_features = []
-    for track_id in track_ids:
-        song_features.append(get_features_by_track_id(track_id))
-    
-    # append the song features to the artist features even if one is empty
-    if artist_features and song_features:
-        features = np.concatenate((np.concatenate(artist_features), np.concatenate(song_features)), axis=0)
-    elif artist_features:
-        features = np.concatenate(artist_features, axis=0)
-    elif song_features:
-        features = np.concatenate(song_features, axis=0)
-    else:
-        raise ValueError("Both artist_features and song_features are empty")
-    # calculate the mean of the features
-    features = np.mean(features, axis=0).reshape(1, -1)
-
-    return features
-
-# Get artists with similar features
-def search_artists_by_features(features, n=5):
-    #print(features)
-    df_artists = df.groupby("artist_name").agg({col: "mean" for col in df.select_dtypes(include=np.number).columns})
-    distances = cdist(features, df_artists.values, metric="euclidean")[0]
-    similar_artist_indices = distances.argsort()[0:n]
-    similar_artist_names = df_artists.iloc[similar_artist_indices].index.tolist()
-    return similar_artist_names
-
-# Get songs with similar features
-def search_songs_by_features(features, n=5):
-    distances = cdist(features, df.iloc[:, 3:].values, metric="euclidean")[0]
-    similar_song_indices = distances.argsort()[0:n]
-    similar_song_ids = df.iloc[similar_song_indices]["track_id"].tolist()
-    similar_artist_names = df.iloc[similar_song_indices]["artist_name"].tolist()
-    return [similar_artist_names, similar_song_ids]
-
-# Get the artist of the given song
-def get_artist_by_track_id(track_id):
-    artist = df[df["track_id"] == track_id]["artist_name"].values[0]
-    return artist
-
-# Return artists and songs that rank highly in the list of similar songs
-# Receives a list of a hundred song ids and gives them a score based on their position in the list
-# The score is calculated as 100 - position in the list
-# Calculates the total score for each artist based on their top 4 songs in the list
-# Returns the top 5 artists and their top 4 songs
-def generate_recommendations(input_artists, features, randomness = 1):
-    n = 100
-    if randomness > 2:
-        n = n * (randomness - 1)
-    similar = search_songs_by_features(features, n=n)
-    song_artists = similar[0]
-    similar_ids = similar[1]
-
-    # Create dictionary that maps each song ID to its index in the similar_ids list
-    id_to_index = {song_id: i for i, song_id in enumerate(similar_ids)}
-    
-    # Calculate scores for each song based on position in the list
-    scores = [n - i for i in range(len(similar_ids))]
-
-    # Shuffle the scores to add randomness based on the randomness parameter
-    if randomness > 1:
-        random.shuffle(scores)
-
-    # Group songs by artist
-    artist_songs = {}
-    for i, artist in enumerate(song_artists):
-        if artist not in artist_songs:
-            artist_songs[artist] = []
-        artist_songs[artist].append(similar_ids[i])
-    
-    # Calculate total score for each artist based on top 4 songs
-    artist_scores = {}
-    artist_song_counts = {}
-    for artist, songs in artist_songs.items():
-        top_songs = sorted(songs, key=lambda x: scores[id_to_index[x]], reverse=True)[:4]
-        artist_scores[artist] = sum([scores[id_to_index[song_id]] for song_id in top_songs])
-        artist_song_counts[artist] = sum([1 for song_id in top_songs if song_id in similar_ids])
-    
-    # Sort artists by score and return top 4 songs for each
-    sorted_artists = sorted(artist_scores.items(), key=lambda x: x[1], reverse=True)
-    recommendations = {}
-    threshold = 100 + (n - 100) * (1200 - 100) / (500 - 100)
-    #st.write(f"Threshold: {threshold}")
-    for artist, score in sorted_artists:
-        if artist_song_counts[artist] >= 2 and score > threshold and artist not in input_artists:
-            top_songs = sorted(artist_songs[artist], key=lambda x: scores[id_to_index[x]], reverse=True)[:4]
-            recommendations[artist] = top_songs
-
-    # Print point values for each recommended artist and song
-    #for artist, songs in recommendations.items():
-    #    st.write(f"{artist}: {artist_scores[artist]}")
-    #    st.write([scores[id_to_index[song_id]] for song_id in songs])
-
-    return recommendations
-
-st.set_page_config(page_title='Vibe - Music Recommendation System',
-                   initial_sidebar_state=st.session_state.get('sidebar_state', 'expanded'))
-
-cols = 2
-
-#import os
-#print(os.listdir())
-
 import base64
+import os
 
-with open("app/Vibe Wide Cropped.png", "rb") as f:
-    data = base64.b64encode(f.read()).decode("utf-8")
+try:
+    from streamlit_gsheets import GSheetsConnection
+    GSHEETS_AVAILABLE = True
+except ImportError:
+    GSHEETS_AVAILABLE = False
 
-    st.sidebar.markdown(
-        f"""
-        <div style="display:table;margin-top:-28%;margin-left:-9%;margin-right:-10%;margin-bottom:10%">
-            <img src="data:image/png;base64,{data}" width="336" height="168">
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+st.set_page_config(
+    page_title='Vibe',
+    page_icon='🎵',
+    layout='wide',
+    initial_sidebar_state='expanded',
+)
 
-# Add logo wide
-#st.sidebar.image('Vibe Wide.png')
+# Clean styling and preconnect hints for faster embed loading
+st.markdown("""
+<link rel="preconnect" href="https://open.spotify.com">
+<link rel="preconnect" href="https://i.scdn.co">
+<link rel="dns-prefetch" href="https://open.spotify.com">
+<link rel="dns-prefetch" href="https://i.scdn.co">
+<style>
+    /* Sidebar logo sizing */
+    .sidebar-logo {
+        width: 100%;
+        max-width: 220px;
+        margin-bottom: 1.5rem;
+    }
+    
+    /* Spotify embeds */
+    .spotify-embed iframe {
+        border-radius: 12px;
+        margin: 0px;
+    }
+    
+    /* Tighter sidebar spacing */
+    section[data-testid="stSidebar"] .block-container {
+        padding-top: 1rem;
+    }
 
-# Create expandable pane for settings
-with st.sidebar.expander('Settings', expanded=False):
-    #add slider for number of columns
-    #cols = st.slider('Number of columns', 1, 4, 3)
-    max_artists = st.slider('Maximum number of recommended artists', 1, 6, 4)
-    randomness = st.slider('Variance', 1, 5, 2, help='This parameter increses the variance of recommendations. The lowest setting of 1 will always give the same recommendations for identical inputs. Higher values will give more diverse recommendations.')
+    /* Remove sidebar header margin */
+    [data-testid="stSidebarHeader"] {
+        margin-bottom: 0px;
+    }
+
+    /* Main block container padding */
+    [data-testid="stMainBlockContainer"] {
+        padding-top: 2rem !important;
+        padding-bottom: 3rem !important;
+    }
+
+    /* Responsive grid for Auto columns - max 3 */
+    .auto-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 1rem;
+    }
+    /* Cap at 3 columns max */
+    @supports (grid-template-columns: repeat(auto-fill, minmax(min(350px, 100%), 1fr))) {
+        .auto-grid {
+            grid-template-columns: repeat(auto-fill, minmax(min(350px, 100%), 1fr));
+        }
+    }
+    .auto-grid-card:nth-child(3n+4) {
+        grid-column: auto;
+    }
+    .auto-grid-card {
+        border: 1px solid rgba(49, 51, 63, 0.2);
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+    }
+    .auto-grid-card h3 {
+        margin: 0 0 0.25rem 0 !important;
+        font-size: 1.5rem !important;
+    }
+
+    /* Hide anchor links on headings */
+    a.st-emotion-cache-1aehpvj,
+    .stMarkdown h3 a,
+    [data-testid="stHeadingWithActionElements"] a {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    /* Tighter container padding for results */
+    [data-testid="stVerticalBlock"] > [data-testid="element-container"] [data-testid="stVerticalBlockBorderWrapper"] {
+        padding: 0.75rem !important;
+    }
+
+    /* Inline info banner */
+    .inline-info {
+        display: inline-block;
+        background-color: rgba(28, 131, 225, 0.1);
+        color: rgb(28, 131, 225);
+        padding: 0.4rem 0.75rem;
+        border-radius: 0.375rem;
+        font-size: 0.875rem;
+    }
+
+    /* Vertically center header row content */
+    .header-text {
+        display: flex;
+        align-items: center;
+        height: 38px;
+        font-weight: 600;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Simple staggered embed loading
+st.html("""
+<script>
+(function() {
+    let pending = null;
+    function loadEmbeds() {
+        clearTimeout(pending);
+        pending = setTimeout(() => {
+            document.querySelectorAll('.spotify-embed iframe[data-src]:not([src])').forEach((el, i) => {
+                setTimeout(() => { el.src = el.dataset.src; }, i * 200);
+            });
+        }, 0);
+    }
+    new MutationObserver(loadEmbeds).observe(document.body, {childList: true, subtree: true});
+    loadEmbeds();
+})();
+</script>
+""", unsafe_allow_javascript=True)
+
+@st.cache_data(show_spinner="Loading...")
+def load_data():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(base_dir, '..', 'data', 'data_encoded.parquet')
+    if not os.path.exists(data_path):
+        data_path = os.path.join(base_dir, 'data', 'data_encoded.parquet')
+    
+    df = pd.read_parquet(data_path)
+    required = ['artist_name', 'track_name', 'track_id']
+    if not all(col in df.columns for col in required):
+        st.error("Invalid data file")
+        st.stop()
+    return df
+
 
 @st.cache_data
-def load_data():
-    return pd.read_parquet('data/data_encoded.parquet')
+def load_logo():
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(base_dir, "Vibe Wide Cropped.png")
+        if os.path.exists(logo_path):
+            with open(logo_path, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        pass
+    return None
 
-df = load_data()
-
-# Create multiselect for artist selection
-artist_names = df['artist_name'].unique()
-artists = st.sidebar.multiselect('Select up to 5 artists', artist_names, default=[], key='artists', max_selections=5)
-
-# Create song selection for each artist
-track_ids = []
-selection_dict = {}
-for artist in artists:
-    selection_dict[artist] = []
-    st.sidebar.write(f"### {artist}")
-    track_names = df[df['artist_name']==artist]['track_name'].unique()
-    selected_tracks = st.sidebar.multiselect('Select specific songs', track_names, default=[], key=artist, max_selections=3)
-    for track_name in selected_tracks:
-        if track_name != '':
-            selection_dict[artist].append(track_name)
-            # Check that artist and track name are unique
-            track_id = df[(df['artist_name']==artist) & (df['track_name']==track_name)]['track_id'].unique()[0]
-            track_ids.append(track_id)
-
-
-def save_recommendations(artist_dict, recommendations):
-    # Save recommendations as an HTML file
-    html = """
-    <html>
-    <head>
-        <title>Vibe Recommendations</title>
-        <style>
-            body {
-                font-family: sans-serif;
-            }
-            iframe {
-                margin-bottom: 10px;
-            }
-        </style>
-    </head>
-    <body>
-    """
-    html += "<h1>Input Artists:</h1>"
-    html += ', '.join([f"{artist} ({', '.join(songs)})" for artist, songs in artist_dict.items()])
-    
-    html += "<h1>Recommendations:</h1>"
-    for artist, songs in recommendations.items():
-        html += f"<h2>{artist}</h2>"
-        for song_id in songs:
-            html += f'<iframe src="https://open.spotify.com/embed/track/{song_id}" width="275" height="80" frameborder="0" allowtransparency="true" allow="encrypted-media"></iframe>'
-            html += "   "
-    html += "</body></html>"
-    return html
 
 def save_input_artists(artists_songs):
-    conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
-    sheet = conn.read(worksheet="Data", usecols=list(range(21)), ttl=0)
+    if not GSHEETS_AVAILABLE:
+        return
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+        sheet = conn.read(worksheet="Data", usecols=list(range(21)), ttl=0)
+        
+        new_row = [datetime.now().strftime("%Y%m%d-%H%M%S")]
+        for artist, songs in artists_songs.items():
+            new_row += [artist] + songs + [None] * (3 - len(songs))
+        new_row += [None] * (len(sheet.columns) - len(new_row))
+        
+        new_row_df = pd.DataFrame([new_row], columns=sheet.columns)
+        sheet = sheet.dropna(how="all")
+        sheet = pd.concat([sheet, new_row_df], ignore_index=True)
+        conn.update(worksheet="Data", data=sheet)
+    except Exception:
+        pass
 
-    # Create a new row with the current date and time
-    new_row = [datetime.now().strftime("%Y%m%d-%H%M%S")]
 
-    # Add the artists and songs to the new row
-    for artist, songs in artists_songs.items():
-        new_row += [artist] + songs + [None] * (3 - len(songs))
+def get_combined_features(df, artists, track_ids):
+    all_features = []
+    
+    if artists:
+        artist_features = df[df["artist_name"].isin(artists)].iloc[:, 3:].values
+        if artist_features.size > 0:
+            all_features.append(artist_features)
+    
+    if track_ids:
+        track_features = df[df["track_id"].isin(track_ids)].iloc[:, 3:].values
+        if track_features.size > 0:
+            all_features.append(track_features)
+    
+    if not all_features:
+        return None
+    
+    combined = np.concatenate(all_features, axis=0)
+    return np.mean(combined, axis=0).reshape(1, -1)
 
-    # Pad new_row with None for any missing columns
-    new_row += [None] * (len(sheet.columns) - len(new_row))
 
-    # Convert new_row to a DataFrame
-    new_row_df = pd.DataFrame([new_row], columns=sheet.columns)
+def generate_recommendations(df, input_artists, features, diversity, max_artists):
+    n = 100 * diversity
+    
+    numeric_cols = df.select_dtypes(include=np.number)
+    distances = cdist(features, numeric_cols.values, metric="euclidean")[0]
+    similar_indices = distances.argsort()[:n]
+    
+    similar_songs = df.iloc[similar_indices].copy()
+    similar_songs['score'] = np.arange(n, 0, -1)
+    
+    if diversity > 1:
+        similar_songs['score'] = np.random.permutation(similar_songs['score'])
+    
+    # Exclude input artists
+    pool = similar_songs[~similar_songs['artist_name'].isin(input_artists)]
+    
+    artist_scores = pool.groupby('artist_name')['score'].sum()
+    artist_counts = pool.groupby('artist_name')['track_id'].count()
+    
+    # Require at least 2 songs in pool
+    qualified = artist_scores[artist_counts >= 2].sort_values(ascending=False)
+    
+    recommendations = {}
+    for artist in qualified.head(max_artists).index:
+        top_songs = (
+            pool[pool['artist_name'] == artist]
+            .sort_values('score', ascending=False)
+            .head(4)['track_id']
+            .tolist()
+        )
+        recommendations[artist] = top_songs
+    
+    return recommendations
 
-    # Find the first non-NaN row
-    sheet = sheet.dropna(how="all")
 
-    sheet = pd.concat([sheet, new_row_df], ignore_index=False)
-    conn.update(worksheet="Data", data=sheet)
+def spotify_embed(track_id):
+    return f'''<div class="spotify-embed">
+        <iframe data-src="https://open.spotify.com/embed/track/{track_id}"
+            width="100%" height="80" frameborder="0"
+            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>
+    </div>'''
 
-if len(artists) > 0:
-    #add button to search for similar artists and songs
-    if st.sidebar.button('Search for similar artists'):
-        if len(artists) == 0:
-            st.error("Please select at least one artist")
+
+def generate_html(input_artists, recommendations):
+    """Generate standalone HTML file with recommendations."""
+    html = '''<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe Recommendations</title>
+<style>
+:root { --accent: #4A6FA5; --navy: #1E2A4A; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+       max-width: 1200px; margin: 0 auto; padding: 20px; background: #f8f9fa; color: var(--navy); }
+h1 { color: var(--navy); border-bottom: 3px solid var(--accent); padding-bottom: 10px; }
+.input { background: #EEF2F7; padding: 15px; border-radius: 8px; 
+         margin-bottom: 20px; border-left: 4px solid var(--accent); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 12px rgba(30,42,74,0.08); 
+        border-top: 3px solid var(--accent); }
+.card h2 { color: var(--navy); margin-top: 0; font-size: 1.2rem; }
+iframe { border-radius: 12px; margin: 8px 0; }
+</style>
+</head><body>
+<h1>Vibe Recommendations</h1>'''
+    
+    html += f'<div class="input"><strong>Based on:</strong> {" • ".join(input_artists)}</div>'
+    html += '<div class="grid">'
+    
+    for artist, songs in recommendations.items():
+        html += f'<div class="card"><h2>{artist}</h2>'
+        for track_id in songs:
+            html += f'<iframe src="https://open.spotify.com/embed/track/{track_id}" width="100%" height="80" frameborder="0"></iframe>'
+        html += '</div>'
+    
+    html += '</div></body></html>'
+    return html
+
+
+def main():
+    if 'recommendations' not in st.session_state:
+        st.session_state.recommendations = {}
+    if 'last_params' not in st.session_state:
+        st.session_state.last_params = None
+
+    df = load_data()
+    # Sort artists by popularity (most popular first)
+    artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
+    artists_list = artist_popularity.index.tolist()
+
+    # Sidebar
+    with st.sidebar:
+        logo = load_logo()
+        if logo:
+            st.markdown(f'<img src="data:image/png;base64,{logo}" class="sidebar-logo">', unsafe_allow_html=True)
         else:
-            features = get_features_by_artists_and_track_ids(artists, track_ids)
-            recommendations = generate_recommendations(artists, features, randomness)
-            recommendations = {k: recommendations[k] for k in list(recommendations)[:max_artists]}
+            st.title("Vibe")
+        
+        # Settings at top, collapsed by default
+        with st.expander("Settings", expanded=False):
+            max_results = st.slider("Max artists", 1, 8, 4)
+            diversity = st.slider("Diversity", 1, 5, 2, help="Higher = more variety")
+            columns = st.pills("Columns", ["Auto", "1", "2", "3"], default="Auto")
+        
+        st.markdown("#### Select Artists")
+        selected_artists = st.multiselect(
+            "Search and select",
+            artists_list,
+            max_selections=5,
+            placeholder="Type to search...",
+            label_visibility="collapsed"
+        )
+        
+        # Song selection for fine-tuning
+        selected_tracks = []
+        selection_dict = {}
+        
+        if selected_artists:
+            st.markdown("#### Fine-tune")
+            st.caption("Optional: pick specific songs")
+            for artist in selected_artists:
+                selection_dict[artist] = []
+                tracks = sorted(df[df['artist_name'] == artist]['track_name'].unique())
+                with st.expander(artist):
+                    chosen = st.multiselect(
+                        f"Songs by {artist}",
+                        tracks,
+                        key=f"tracks_{artist}",
+                        max_selections=3,
+                        label_visibility="collapsed"
+                    )
+                    if chosen:
+                        selection_dict[artist] = chosen
+                        ids = df[(df['artist_name'] == artist) & (df['track_name'].isin(chosen))]['track_id'].tolist()
+                        selected_tracks.extend(ids)
+        
+        st.markdown("")  # Spacing
+        search = st.button("Find Music", type="primary", use_container_width=True, disabled=not selected_artists)
 
-            # Display songs in two columns
-            col_list = st.columns(cols)
-            for i, (artist, songs) in enumerate(recommendations.items()):
-                col_index = i % cols
-                with col_list[col_index]:
-                    st.write("### " + artist.replace('$', '\$'))
-                    for song_id in songs:
-                        st.write(f'<iframe src="https://open.spotify.com/embed/track/{song_id}" width="300" height="80" frameborder="0" allowtransparency="true" allow="encrypted-media"></iframe>', unsafe_allow_html=True)
-                    #st.divider()
-                    st.text("")
-
-            # Save recommendations as a file
-            st.download_button('Download recommendations', save_recommendations(selection_dict, recommendations), file_name='recommendations' + datetime.now().strftime("%Y%m%d-%H%M%S") + '.html')
-
-            save_input_artists(selection_dict)
-
+    # Main content
+    if not selected_artists:
+        # Clear results when all artists are removed
+        st.session_state.recommendations = {}
+        st.session_state.last_params = None
+        st.title("Vibe")
+        st.markdown("**Discover new music based on artists you love.**")
+        st.markdown("Select artists in the sidebar to get started.")
+        return
+    
+    params = {
+        'artists': tuple(sorted(selected_artists)),
+        'tracks': tuple(sorted(selected_tracks)),
+        'diversity': diversity,
+        'max': max_results
+    }
+    
+    if search and st.session_state.last_params != params:
+        with st.spinner("Finding recommendations..."):
+            features = get_combined_features(df, selected_artists, selected_tracks)
+            if features is not None:
+                recs = generate_recommendations(df, selected_artists, features, diversity, max_results)
+                st.session_state.recommendations = recs
+                st.session_state.last_params = params
+                save_input_artists(selection_dict)
+                # Force a rerun to stabilize DOM before user interacts
+                st.rerun()
+    
+    recs = st.session_state.recommendations
+    
+    if not recs:
+        if search:
+            st.warning("No recommendations found. Try different artists.")
+        else:
+            st.info("Click **Find Music** to get recommendations.")
+        return
+    
+    # Check if current params differ from last search
+    params_changed = st.session_state.last_params != params
+    
+    # Results header with download
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if params_changed:
+            st.markdown('<div class="inline-info">Click <b>Find Music</b> to update results</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="header-text">{len(recs)} artists based on your selection</div>', unsafe_allow_html=True)
+    with col2:
+        input_artists = st.session_state.last_params['artists'] if st.session_state.last_params else selected_artists
+        st.download_button(
+            "Download",
+            data=lambda: generate_html(input_artists, recs),
+            file_name=f"vibe_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+            mime="text/html",
+            use_container_width=True,
+            key="download_results"
+        )
+    
+    # Display results
+    if columns == "Auto":
+        # Use CSS Grid for responsive width-based columns (max 3)
+        grid_items = ""
+        for artist, songs in recs.items():
+            embeds = "".join([spotify_embed(track_id) for track_id in songs])
+            grid_items += f'<div class="auto-grid-card"><h3>{artist}</h3>{embeds}</div>'
+        st.markdown(f'<div class="auto-grid">{grid_items}</div>', unsafe_allow_html=True)
+    elif columns == "1":
+        for artist, songs in recs.items():
+            with st.container(border=True):
+                st.markdown(f"### {artist}")
+                for track_id in songs:
+                    st.markdown(spotify_embed(track_id), unsafe_allow_html=True)
     else:
-        st.header('Vibe - Music Recommendation System')
-        st.divider()
-        #instructions to search
-        st.write('#### Add more artists or select specific songs to tune recommendations')
-        st.write('#### Click the search button to generate recommendations')
-else:
-    st.header('Vibe - Music Recommendation System')
-    st.divider()
-
-    #instructions to search
-    st.write('#### Select at least one artist to generate recommendations')
+        num_cols = min(int(columns), 3)
+        cols = st.columns(num_cols, gap="medium")
+        for i, (artist, songs) in enumerate(recs.items()):
+            with cols[i % num_cols]:
+                with st.container(border=True):
+                    st.markdown(f"### {artist}")
+                    for track_id in songs:
+                        st.markdown(spotify_embed(track_id), unsafe_allow_html=True)
 
 
+if __name__ == "__main__":
+    main()
