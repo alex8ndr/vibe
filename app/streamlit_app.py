@@ -20,23 +20,83 @@ st.set_page_config(
 )
 
 # Clean styling and preconnect hints for faster embed loading
-st.markdown("""
+# Clean styling and preconnect hints for faster embed loading
+st.html("""
 <link rel="preconnect" href="https://open.spotify.com">
 <link rel="preconnect" href="https://i.scdn.co">
-<link rel="dns-prefetch" href="https://open.spotify.com">
-<link rel="dns-prefetch" href="https://i.scdn.co">
+<script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
+<script>
+// Store API when ready
+window.onSpotifyIframeApiReady = (IFrameAPI) => { 
+    window.SpotifyAPI = IFrameAPI;
+    window.initVibePlayer && window.initVibePlayer();
+};
+
+// Player initialization function
+window.initVibePlayer = function() {
+    const container = document.getElementById('spotify-player-container');
+    if (!container || container.querySelector('iframe')) return;
+    
+    const firstTrack = container.dataset.track;
+    if (!window.SpotifyAPI) return;
+    
+    window.SpotifyAPI.createController(container, {
+        width: '100%',
+        height: '80',
+        uri: firstTrack ? 'spotify:track:' + firstTrack : ''
+    }, (controller) => {
+        window.spotifyController = controller;
+    });
+};
+
+// Click handler for track buttons
+if (!window.vibeClickHandler) {
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.track-btn');
+        if (!btn) return;
+        
+        const trackId = btn.dataset.trackId;
+        if (window.spotifyController && trackId) {
+            // If clicking the same track that is currently loaded
+            if (window.currentTrackId === trackId) {
+                window.spotifyController.togglePlay();
+                
+                // Toggle visual state
+                if (btn.classList.contains('playing')) {
+                    btn.classList.remove('playing');
+                } else {
+                    btn.classList.add('playing');
+                }
+            } else {
+                // New track: load and play
+                window.currentTrackId = trackId;
+                window.spotifyController.loadUri('spotify:track:' + trackId);
+                window.spotifyController.play();
+                
+                document.querySelectorAll('.track-btn.playing').forEach(el => el.classList.remove('playing'));
+                btn.classList.add('playing');
+            }
+        }
+    });
+    window.vibeClickHandler = true;
+}
+
+// Watch for player container to appear
+new MutationObserver(() => {
+    if (document.getElementById('spotify-player-container')) {
+        window.initVibePlayer();
+    }
+}).observe(document.body, {childList: true, subtree: true});
+</script>
+""", unsafe_allow_javascript=True)
+
+st.markdown("""
 <style>
     /* Sidebar logo sizing */
     .sidebar-logo {
         width: 100%;
         max-width: 220px;
         margin-bottom: 1.5rem;
-    }
-    
-    /* Spotify embeds */
-    .spotify-embed iframe {
-        border-radius: 12px;
-        margin: 0px;
     }
     
     /* Tighter sidebar spacing */
@@ -61,15 +121,6 @@ st.markdown("""
         grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
         gap: 1rem;
     }
-    /* Cap at 3 columns max */
-    @supports (grid-template-columns: repeat(auto-fill, minmax(min(350px, 100%), 1fr))) {
-        .auto-grid {
-            grid-template-columns: repeat(auto-fill, minmax(min(350px, 100%), 1fr));
-        }
-    }
-    .auto-grid-card:nth-child(3n+4) {
-        grid-column: auto;
-    }
     .auto-grid-card {
         border: 1px solid rgba(49, 51, 63, 0.2);
         border-radius: 0.5rem;
@@ -81,16 +132,8 @@ st.markdown("""
     }
 
     /* Hide anchor links on headings */
-    a.st-emotion-cache-1aehpvj,
-    .stMarkdown h3 a,
     [data-testid="stHeadingWithActionElements"] a {
         display: none !important;
-        visibility: hidden !important;
-    }
-
-    /* Tighter container padding for results */
-    [data-testid="stVerticalBlock"] > [data-testid="element-container"] [data-testid="stVerticalBlockBorderWrapper"] {
-        padding: 0.75rem !important;
     }
 
     /* Inline info banner */
@@ -103,34 +146,90 @@ st.markdown("""
         font-size: 0.875rem;
     }
 
-    /* Vertically center header row content */
+    /* Header text */
     .header-text {
         display: flex;
         align-items: center;
         height: 38px;
         font-weight: 600;
     }
+
+    /* Global player container */
+    .global-player {
+        position: sticky;
+        top: 3.5rem;
+        margin: 0 0 1.5rem 0;
+        background: #121212;
+        padding: 0.5rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        border: 1px solid rgba(255,255,255,0.1);
+        z-index: 990;
+        overflow: hidden;
+    }
+    .global-player iframe {
+        border-radius: 12px;
+        display: block;
+        border: none;
+    }
+
+    /* Track buttons */
+    .track-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+        padding: 0.85rem 1rem;
+        margin: 0.5rem 0;
+        border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 10px;
+        background: var(--btn-bg, linear-gradient(145deg, #1e1e24 0%, #16161d 100%));
+        color: #e0e0e0;
+        font-size: 0.95rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: transform 0.2s ease, background 0.2s ease;
+        text-align: left;
+        position: relative;
+        overflow: hidden;
+    }
+    .track-btn::after {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; width: 4px; height: 100%;
+        background: var(--accent-color, transparent);
+        opacity: 0.8;
+    }
+    .track-btn:hover {
+        background: var(--btn-hover, linear-gradient(145deg, #25252d 0%, #1c1c24 100%));
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        color: #fff;
+    }
+    .track-btn.playing {
+        background: linear-gradient(135deg, #1db954 0%, #169c46 100%);
+        color: white;
+        box-shadow: 0 4px 15px rgba(29, 185, 84, 0.3);
+    }
+    .track-btn::before {
+        content: '♫';
+        font-size: 1.1rem;
+        opacity: 0.5;
+        width: 24px;
+        text-align: center;
+    }
+    .track-btn:hover::before {
+        content: '▶';
+        color: var(--accent-color, #1db954);
+        opacity: 1;
+    }
+    .track-btn.playing::before {
+        content: 'll';
+        color: white;
+        opacity: 1;
+    }
 </style>
 """, unsafe_allow_html=True)
-
-# Simple staggered embed loading
-st.html("""
-<script>
-(function() {
-    let pending = null;
-    function loadEmbeds() {
-        clearTimeout(pending);
-        pending = setTimeout(() => {
-            document.querySelectorAll('.spotify-embed iframe[data-src]:not([src])').forEach((el, i) => {
-                setTimeout(() => { el.src = el.dataset.src; }, i * 200);
-            });
-        }, 0);
-    }
-    new MutationObserver(loadEmbeds).observe(document.body, {childList: true, subtree: true});
-    loadEmbeds();
-})();
-</script>
-""", unsafe_allow_javascript=True)
 
 @st.cache_data(show_spinner="Loading...")
 def load_data():
@@ -151,7 +250,7 @@ def load_data():
 def load_logo():
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        logo_path = os.path.join(base_dir, "Vibe Wide Cropped.png")
+        logo_path = os.path.join(base_dir, "Vibe Banner.png")
         if os.path.exists(logo_path):
             with open(logo_path, "rb") as f:
                 return base64.b64encode(f.read()).decode("utf-8")
@@ -224,23 +323,42 @@ def generate_recommendations(df, input_artists, features, diversity, max_artists
     
     recommendations = {}
     for artist in qualified.head(max_artists).index:
-        top_songs = (
-            pool[pool['artist_name'] == artist]
-            .sort_values('score', ascending=False)
-            .head(4)['track_id']
-            .tolist()
-        )
-        recommendations[artist] = top_songs
+        artist_tracks = pool[pool['artist_name'] == artist].sort_values('score', ascending=False).head(4)
+        # Store both track_id and track_name
+        tracks = [(row['track_id'], row['track_name']) for _, row in artist_tracks.iterrows()]
+        recommendations[artist] = tracks
     
     return recommendations
 
 
-def spotify_embed(track_id):
-    return f'''<div class="spotify-embed">
-        <iframe data-src="https://open.spotify.com/embed/track/{track_id}"
-            width="100%" height="80" frameborder="0"
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"></iframe>
-    </div>'''
+def get_artist_colors(artist_name):
+    """Generate consistent colors based on artist name hash."""
+    import hashlib
+    hash_val = int(hashlib.md5(artist_name.encode()).hexdigest(), 16)
+    
+    # HSL generation for pleasing colors
+    hue = hash_val % 360
+    hue2 = (hue + 40) % 360
+    
+    # Generate gradient and accent color
+    # Darker gradient for background, brighter for accent
+    bg_gradient = f"linear-gradient(135deg, hsl({hue}, 60%, 15%) 0%, hsl({hue2}, 50%, 10%) 100%)"
+    hover_gradient = f"linear-gradient(135deg, hsl({hue}, 70%, 20%) 0%, hsl({hue2}, 60%, 15%) 100%)"
+    accent_color = f"hsl({hue}, 80%, 60%)"
+    
+    return bg_gradient, hover_gradient, accent_color
+
+def track_button(track_id, track_name, artist_name):
+    # Truncate long track names
+    display_name = track_name[:40] + '...' if len(track_name) > 40 else track_name
+    
+    # Get dynamic colors
+    bg, hover, accent = get_artist_colors(artist_name)
+    
+    # Inject CSS variables into style attribute
+    style = f"--btn-bg: {bg}; --btn-hover: {hover}; --accent-color: {accent};"
+    
+    return f'<button class="track-btn" data-track-id="{track_id}" style="{style}">{display_name}</button>'
 
 
 def generate_html(input_artists, recommendations):
@@ -268,9 +386,9 @@ iframe { border-radius: 12px; margin: 8px 0; }
     html += f'<div class="input"><strong>Based on:</strong> {" • ".join(input_artists)}</div>'
     html += '<div class="grid">'
     
-    for artist, songs in recommendations.items():
+    for artist, tracks in recommendations.items():
         html += f'<div class="card"><h2>{artist}</h2>'
-        for track_id in songs:
+        for track_id, track_name in tracks:
             html += f'<iframe src="https://open.spotify.com/embed/track/{track_id}" width="100%" height="80" frameborder="0"></iframe>'
         html += '</div>'
     
@@ -396,29 +514,44 @@ def main():
             key="download_results"
         )
     
-    # Display results
+    # Global player - simple iframe
+    first_track = ""
+    if recs:
+        try:
+            first_artist = next(iter(recs))
+            first_track = recs[first_artist][0][0]
+        except (StopIteration, IndexError):
+            pass
+    
+    # Player container
+    st.markdown(f'''
+        <div class="global-player">
+            <div id="spotify-player-container" data-track="{first_track}"></div>
+        </div>
+    ''', unsafe_allow_html=True)
+    
+    # Display results with track buttons
     if columns == "Auto":
-        # Use CSS Grid for responsive width-based columns (max 3)
         grid_items = ""
-        for artist, songs in recs.items():
-            embeds = "".join([spotify_embed(track_id) for track_id in songs])
-            grid_items += f'<div class="auto-grid-card"><h3>{artist}</h3>{embeds}</div>'
+        for artist, tracks in recs.items():
+            buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
+            grid_items += f'<div class="auto-grid-card"><h3>{artist}</h3>{buttons}</div>'
         st.markdown(f'<div class="auto-grid">{grid_items}</div>', unsafe_allow_html=True)
     elif columns == "1":
-        for artist, songs in recs.items():
+        for artist, tracks in recs.items():
             with st.container(border=True):
                 st.markdown(f"### {artist}")
-                for track_id in songs:
-                    st.markdown(spotify_embed(track_id), unsafe_allow_html=True)
+                buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
+                st.markdown(buttons, unsafe_allow_html=True)
     else:
         num_cols = min(int(columns), 3)
         cols = st.columns(num_cols, gap="medium")
-        for i, (artist, songs) in enumerate(recs.items()):
+        for i, (artist, tracks) in enumerate(recs.items()):
             with cols[i % num_cols]:
                 with st.container(border=True):
                     st.markdown(f"### {artist}")
-                    for track_id in songs:
-                        st.markdown(spotify_embed(track_id), unsafe_allow_html=True)
+                    buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
+                    st.markdown(buttons, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
