@@ -30,29 +30,45 @@ st.html("""
         window.initPlayers();
     };
 
-    window.artistControllers = {};
+    // Preserve state across Streamlit re-runs
+    window.artistControllers = window.artistControllers || {};
+    window.playbackState = window.playbackState || {}; // Track isPaused per artist
 
     window.initPlayers = function() {
         if (!window.SpotifyAPI) return;
 
-        document.querySelectorAll('.artist-player').forEach(container => {
-            if (container.querySelector('iframe')) return;
+        document.querySelectorAll('.artist-player').forEach((container, index) => {
+            if (container.querySelector('iframe') || container.dataset.initializing) return;
 
             const artistId = container.dataset.artistId;
             const firstTrack = container.dataset.track;
-
             if (!artistId) return;
 
-            window.SpotifyAPI.createController(container, {
-                width: '100%',
-                height: '80',
-                uri: firstTrack ? 'spotify:track:' + firstTrack : ''
-            }, (controller) => {
-                window.artistControllers[artistId] = controller;
-                controller.addListener('ready', () => {
-                    container.style.opacity = 1;
+            container.dataset.initializing = "true";
+
+            setTimeout(() => {
+                window.SpotifyAPI.createController(container, {
+                    width: '100%',
+                    height: '80',
+                    uri: firstTrack ? 'spotify:track:' + firstTrack : ''
+                }, (controller) => {
+                    window.artistControllers[artistId] = controller;
+                    window.artistFirstTracks = window.artistFirstTracks || {};
+                    window.artistFirstTracks[artistId] = firstTrack;
+                    window.artistCurrentTracks = window.artistCurrentTracks || {};
+                    window.artistCurrentTracks[artistId] = firstTrack; // Track what's currently loaded
+                    
+                    // Track playback state via events
+                    controller.addListener('playback_update', (e) => {
+                        window.playbackState[artistId] = e.data.isPaused;
+                    });
+                    
+                    controller.addListener('ready', () => {
+                        container.style.opacity = 1;
+                        delete container.dataset.initializing;
+                    });
                 });
-            });
+            }, index * 100);
         });
     };
 
@@ -67,31 +83,37 @@ st.html("""
 
             const trackId = btn.dataset.trackId;
             const artistId = btn.dataset.artistId;
-
             const controller = window.artistControllers[artistId];
 
             if (controller && trackId) {
-                // Efficiently pause ONLY the previously playing artist
+                // Pause the previously playing controller and refresh its view
                 if (window.currentArtistId && window.currentArtistId !== artistId) {
-                    const prevController = window.artistControllers[window.currentArtistId];
-                    if (prevController) prevController.pause();
+                    const prev = window.artistControllers[window.currentArtistId];
+                    if (prev) {
+                        prev.pause();
+                        // Reload the SAME track to refresh the embed and avoid nag screen
+                        const currentTrack = window.artistCurrentTracks[window.currentArtistId];
+                        if (currentTrack) prev.loadUri('spotify:track:' + currentTrack);
+                    }
                 }
 
-                if (btn.classList.contains('playing')) {
+                const isSameTrack = (window.currentTrackId === trackId && window.currentArtistId === artistId);
+                
+                if (isSameTrack) {
+                    // Toggle play/pause for same track
                     controller.togglePlay();
-                    btn.classList.remove('playing');
+                    btn.classList.toggle('playing');
                 } else {
-                    // Update global state
+                    // New track: load and play
                     window.currentArtistId = artistId;
                     window.currentTrackId = trackId;
                     
-                    // loadUri auto-plays on user interaction
                     controller.loadUri('spotify:track:' + trackId);
+                    controller.play();
                     
-                    // Backup: retry play after delays in case auto-play fails
-                    setTimeout(() => controller.play(), 300);
-                    setTimeout(() => controller.play(), 800);
-
+                    // Track what this artist is now showing
+                    window.artistCurrentTracks[artistId] = trackId;
+                    
                     document.querySelectorAll('.track-btn.playing').forEach(el => el.classList.remove('playing'));
                     btn.classList.add('playing');
                 }
@@ -139,6 +161,7 @@ st.markdown("""
     }
     .auto-grid-card {
         border: 1px solid rgba(49, 51, 63, 0.2);
+        background: rgba(255,255,255,0.02);
         border-radius: 0.5rem;
         padding: 0.75rem;
     }
@@ -175,13 +198,16 @@ st.markdown("""
         margin-bottom: 0.5rem;
         border-radius: 12px;
         overflow: hidden;
-        background: transparent;
+        background: #121212;
         min-height: 80px;
+        /* Ensure proper clipping */
+        isolation: isolate;
     }
     .artist-player iframe {
         border-radius: 12px;
         display: block;
         border: none;
+        background: #121212;
     }
 
     /* Compact Track buttons */
@@ -443,6 +469,7 @@ def main():
         
         # Placeholder for the search button so it visually appears at the top
         search_placeholder = st.empty()
+        search_placeholder.button("Find Music", type="primary", use_container_width=True, disabled=True, key="find_music_placeholder")
 
         st.markdown("#### Select Artists")
         selected_artists = st.multiselect(
