@@ -20,73 +20,89 @@ st.set_page_config(
 )
 
 # Clean styling and preconnect hints for faster embed loading
-# Clean styling and preconnect hints for faster embed loading
 st.html("""
 <link rel="preconnect" href="https://open.spotify.com">
 <link rel="preconnect" href="https://i.scdn.co">
 <script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
 <script>
-// Store API when ready
-window.onSpotifyIframeApiReady = (IFrameAPI) => { 
-    window.SpotifyAPI = IFrameAPI;
-    window.initVibePlayer && window.initVibePlayer();
-};
+    window.onSpotifyIframeApiReady = (IFrameAPI) => {
+        window.SpotifyAPI = IFrameAPI;
+        window.initPlayers();
+    };
 
-// Player initialization function
-window.initVibePlayer = function() {
-    const container = document.getElementById('spotify-player-container');
-    if (!container || container.querySelector('iframe')) return;
-    
-    const firstTrack = container.dataset.track;
-    if (!window.SpotifyAPI) return;
-    
-    window.SpotifyAPI.createController(container, {
-        width: '100%',
-        height: '80',
-        uri: firstTrack ? 'spotify:track:' + firstTrack : ''
-    }, (controller) => {
-        window.spotifyController = controller;
-    });
-};
+    window.artistControllers = {};
 
-// Click handler for track buttons
-if (!window.vibeClickHandler) {
-    document.addEventListener('click', (e) => {
-        const btn = e.target.closest('.track-btn');
-        if (!btn) return;
-        
-        const trackId = btn.dataset.trackId;
-        if (window.spotifyController && trackId) {
-            // If clicking the same track that is currently loaded
-            if (window.currentTrackId === trackId) {
-                window.spotifyController.togglePlay();
-                
-                // Toggle visual state
+    window.initPlayers = function() {
+        if (!window.SpotifyAPI) return;
+
+        document.querySelectorAll('.artist-player').forEach(container => {
+            if (container.querySelector('iframe')) return;
+
+            const artistId = container.dataset.artistId;
+            const firstTrack = container.dataset.track;
+
+            if (!artistId) return;
+
+            window.SpotifyAPI.createController(container, {
+                width: '100%',
+                height: '80',
+                uri: firstTrack ? 'spotify:track:' + firstTrack : ''
+            }, (controller) => {
+                window.artistControllers[artistId] = controller;
+                controller.addListener('ready', () => {
+                    container.style.opacity = 1;
+                });
+            });
+        });
+    };
+
+    setInterval(() => {
+        if (window.SpotifyAPI) window.initPlayers();
+    }, 1000);
+
+    if (!window.vibeClickHandler) {
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.track-btn');
+            if (!btn) return;
+
+            const trackId = btn.dataset.trackId;
+            const artistId = btn.dataset.artistId;
+
+            const controller = window.artistControllers[artistId];
+
+            if (controller && trackId) {
+                // Efficiently pause ONLY the previously playing artist
+                if (window.currentArtistId && window.currentArtistId !== artistId) {
+                    const prevController = window.artistControllers[window.currentArtistId];
+                    if (prevController) prevController.pause();
+                }
+
                 if (btn.classList.contains('playing')) {
+                    controller.togglePlay();
                     btn.classList.remove('playing');
                 } else {
+                    // Update global state
+                    window.currentArtistId = artistId;
+                    window.currentTrackId = trackId;
+                    
+                    // loadUri auto-plays on user interaction
+                    controller.loadUri('spotify:track:' + trackId);
+                    
+                    // Backup: retry play after delays in case auto-play fails
+                    setTimeout(() => controller.play(), 300);
+                    setTimeout(() => controller.play(), 800);
+
+                    document.querySelectorAll('.track-btn.playing').forEach(el => el.classList.remove('playing'));
                     btn.classList.add('playing');
                 }
-            } else {
-                // New track: load and play
-                window.currentTrackId = trackId;
-                window.spotifyController.loadUri('spotify:track:' + trackId);
-                window.spotifyController.play();
-                
-                document.querySelectorAll('.track-btn.playing').forEach(el => el.classList.remove('playing'));
-                btn.classList.add('playing');
             }
-        }
-    });
-    window.vibeClickHandler = true;
-}
-
-// Watch for player container to appear
-new MutationObserver(() => {
-    if (document.getElementById('spotify-player-container')) {
-        window.initVibePlayer();
+        });
+        window.vibeClickHandler = true;
     }
-}).observe(document.body, {childList: true, subtree: true});
+
+    new MutationObserver(() => {
+        window.initPlayers();
+    }).observe(document.body, {childList: true, subtree: true});
 </script>
 """, unsafe_allow_javascript=True)
 
@@ -118,7 +134,7 @@ st.markdown("""
     /* Responsive grid for Auto columns - max 3 */
     .auto-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(365px, 1fr));
         gap: 1rem;
     }
     .auto-grid-card {
@@ -154,38 +170,33 @@ st.markdown("""
         font-weight: 600;
     }
 
-    /* Global player container */
-    .global-player {
-        position: sticky;
-        top: 3.5rem;
-        margin: 0 0 1.5rem 0;
-        background: #121212;
-        padding: 0.5rem;
+    /* Artist Stats/Player Container */
+    .artist-player {
+        margin-bottom: 0.5rem;
         border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-        border: 1px solid rgba(255,255,255,0.1);
-        z-index: 990;
         overflow: hidden;
+        background: transparent;
+        min-height: 80px;
     }
-    .global-player iframe {
+    .artist-player iframe {
         border-radius: 12px;
         display: block;
         border: none;
     }
 
-    /* Track buttons */
+    /* Compact Track buttons */
     .track-btn {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.5rem;
         width: 100%;
-        padding: 0.85rem 1rem;
-        margin: 0.5rem 0;
+        padding: 0.5rem 0.75rem; 
+        margin: 0.25rem 0;
         border: 1px solid rgba(255,255,255,0.05);
-        border-radius: 10px;
+        border-radius: 8px;
         background: var(--btn-bg, linear-gradient(145deg, #1e1e24 0%, #16161d 100%));
         color: #e0e0e0;
-        font-size: 0.95rem;
+        font-size: 0.85rem;
         font-weight: 500;
         cursor: pointer;
         transition: transform 0.2s ease, background 0.2s ease;
@@ -196,13 +207,13 @@ st.markdown("""
     .track-btn::after {
         content: '';
         position: absolute;
-        top: 0; left: 0; width: 4px; height: 100%;
+        top: 0; left: 0; width: 3px; height: 100%;
         background: var(--accent-color, transparent);
         opacity: 0.8;
     }
     .track-btn:hover {
         background: var(--btn-hover, linear-gradient(145deg, #25252d 0%, #1c1c24 100%));
-        transform: translateY(-2px);
+        transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         color: #fff;
     }
@@ -348,17 +359,22 @@ def get_artist_colors(artist_name):
     
     return bg_gradient, hover_gradient, accent_color
 
+def get_artist_id(artist_name):
+    import hashlib
+    return hashlib.md5(artist_name.encode()).hexdigest()
+
 def track_button(track_id, track_name, artist_name):
     # Truncate long track names
-    display_name = track_name[:40] + '...' if len(track_name) > 40 else track_name
+    display_name = track_name[:35] + '...' if len(track_name) > 35 else track_name
     
     # Get dynamic colors
     bg, hover, accent = get_artist_colors(artist_name)
+    artist_id = get_artist_id(artist_name)
     
     # Inject CSS variables into style attribute
     style = f"--btn-bg: {bg}; --btn-hover: {hover}; --accent-color: {accent};"
     
-    return f'<button class="track-btn" data-track-id="{track_id}" style="{style}">{display_name}</button>'
+    return f'<button class="track-btn" data-track-id="{track_id}" data-artist-id="{artist_id}" style="{style}">{display_name}</button>'
 
 
 def generate_html(input_artists, recommendations):
@@ -409,6 +425,10 @@ def main():
 
     # Sidebar
     with st.sidebar:
+        # Check if logo exists
+        if os.path.exists("alext_dev_logo.svg"):
+            st.logo("alext_dev_logo.svg", size="large", link="https://alext.dev", icon_image="Vibe Banner.png")
+            
         logo = load_logo()
         if logo:
             st.markdown(f'<img src="data:image/png;base64,{logo}" class="sidebar-logo">', unsafe_allow_html=True)
@@ -417,10 +437,13 @@ def main():
         
         # Settings at top, collapsed by default
         with st.expander("Settings", expanded=False):
-            max_results = st.slider("Max artists", 1, 8, 4)
+            max_results = st.slider("Max artists", 1, 8, 6)
             diversity = st.slider("Diversity", 1, 5, 2, help="Higher = more variety")
             columns = st.pills("Columns", ["Auto", "1", "2", "3"], default="Auto")
         
+        # Placeholder for the search button so it visually appears at the top
+        search_placeholder = st.empty()
+
         st.markdown("#### Select Artists")
         selected_artists = st.multiselect(
             "Search and select",
@@ -429,6 +452,9 @@ def main():
             placeholder="Type to search...",
             label_visibility="collapsed"
         )
+        
+        # Render button in the placeholder (now we have the selected_artists state)
+        search = search_placeholder.button("Find Music", type="primary", use_container_width=True, disabled=not selected_artists)
         
         # Song selection for fine-tuning
         selected_tracks = []
@@ -454,7 +480,6 @@ def main():
                         selected_tracks.extend(ids)
         
         st.markdown("")  # Spacing
-        search = st.button("Find Music", type="primary", use_container_width=True, disabled=not selected_artists)
 
     # Main content
     if not selected_artists:
@@ -514,33 +539,23 @@ def main():
             key="download_results"
         )
     
-    # Global player - simple iframe
-    first_track = ""
-    if recs:
-        try:
-            first_artist = next(iter(recs))
-            first_track = recs[first_artist][0][0]
-        except (StopIteration, IndexError):
-            pass
-    
-    # Player container
-    st.markdown(f'''
-        <div class="global-player">
-            <div id="spotify-player-container" data-track="{first_track}"></div>
-        </div>
-    ''', unsafe_allow_html=True)
-    
-    # Display results with track buttons
+    # Display results with track buttons and artist players
     if columns == "Auto":
         grid_items = ""
         for artist, tracks in recs.items():
+            aid = get_artist_id(artist)
+            first_track = tracks[0][0] if tracks else ""
+            player_div = f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"></div>'
             buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
-            grid_items += f'<div class="auto-grid-card"><h3>{artist}</h3>{buttons}</div>'
+            grid_items += f'<div class="auto-grid-card"><h3>{artist}</h3>{player_div}{buttons}</div>'
         st.markdown(f'<div class="auto-grid">{grid_items}</div>', unsafe_allow_html=True)
     elif columns == "1":
         for artist, tracks in recs.items():
             with st.container(border=True):
                 st.markdown(f"### {artist}")
+                aid = get_artist_id(artist)
+                first_track = tracks[0][0] if tracks else ""
+                st.markdown(f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"></div>', unsafe_allow_html=True)
                 buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
                 st.markdown(buttons, unsafe_allow_html=True)
     else:
@@ -550,6 +565,9 @@ def main():
             with cols[i % num_cols]:
                 with st.container(border=True):
                     st.markdown(f"### {artist}")
+                    aid = get_artist_id(artist)
+                    first_track = tracks[0][0] if tracks else ""
+                    st.markdown(f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"></div>', unsafe_allow_html=True)
                     buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
                     st.markdown(buttons, unsafe_allow_html=True)
 
