@@ -1,14 +1,60 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Vibe - Music Recommendation System</title>
+  <meta name="description" content="A smart music recommendation system built with Streamlit and Spotify.">
+  <meta name="author" content="AlextDev">
+
+  <!-- Open Graph / Social Media -->
+  <meta property="og:title" content="Vibe - Music Recommendation System">
+  <meta property="og:description" content="Discover new music with Vibe, powered by Spotify.">
+  <meta property="og:type" content="website">
+
+  <!-- Favicon -->
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎵</text></svg>">
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0e1117;
+      width: 100%;
+      height: 100%;
+    }
+
+    @media (prefers-color-scheme: light) {
+      body {
+        background-color: white;
+      }
+    }
+
+    iframe {
+      display: block;
+      border: none;
+      position: absolute;
+
+      /* Shift up -2px (top border) and left -2px (left border) */
+      top: -2px;
+      left: -2px;
+
+      /* Width: 100vw + 2px (to compensate for -2px left shift), keeps right edge aligned */
+      width: calc(100vw + 2px);
+      height: calc(100vh + 36px);
+    }
+  </style>
+
+  <link rel="canonical" href="https://vibe.alext.dev">
+  <meta name="robots" content="index, follow">
 </head>
-<body style="margin: 0; overflow: hidden;">
 
-<iframe
-  src="https://vibemusic.streamlit.app/?embed=true"
-  style="position: absolute; top: 0; left: 0; width: 102vw; height: 106vh; border: none;"
-></iframe>
-
+<body>
+  <iframe src="https://vibemusic.streamlit.app/?embed=true" scrolling="no"></iframe>
 </body>
+
 </html>

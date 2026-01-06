@@ -156,6 +156,8 @@ st.html("""
 """, unsafe_allow_javascript=True)
 
 st.markdown("""
+<link rel="canonical" href="https://vibe.alext.dev">
+
 <style>
     /* Sidebar logo sizing */
     .sidebar-logo {
