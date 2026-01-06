@@ -32,7 +32,7 @@ st.html("""
 
     // Preserve state across Streamlit re-runs
     window.artistControllers = window.artistControllers || {};
-    window.playbackState = window.playbackState || {}; // Track isPaused per artist
+    window.artistCurrentTracks = window.artistCurrentTracks || {};
 
     window.initPlayers = function() {
         if (!window.SpotifyAPI) return;
@@ -44,32 +44,47 @@ st.html("""
             const firstTrack = container.dataset.track;
             if (!artistId) return;
 
+            const target = container.querySelector('.player-target');
+            if (!target) return;
+
             container.dataset.initializing = "true";
+            container.classList.remove('loaded');
 
             setTimeout(() => {
-                window.SpotifyAPI.createController(container, {
+                window.SpotifyAPI.createController(target, {
                     width: '100%',
                     height: '80',
                     uri: firstTrack ? 'spotify:track:' + firstTrack : ''
                 }, (controller) => {
                     window.artistControllers[artistId] = controller;
-                    window.artistFirstTracks = window.artistFirstTracks || {};
-                    window.artistFirstTracks[artistId] = firstTrack;
-                    window.artistCurrentTracks = window.artistCurrentTracks || {};
-                    window.artistCurrentTracks[artistId] = firstTrack; // Track what's currently loaded
+                    window.artistCurrentTracks[artistId] = firstTrack;
                     
-                    // Track playback state via events
-                    controller.addListener('playback_update', (e) => {
-                        window.playbackState[artistId] = e.data.isPaused;
-                    });
-                    
-                    controller.addListener('ready', () => {
-                        container.style.opacity = 1;
+                    const markLoaded = () => {
+                        container.classList.add('loaded');
+                        container.classList.remove('loading');
                         delete container.dataset.initializing;
-                    });
+                    };
+                    
+                    const iframe = container.querySelector('iframe');
+                    if (iframe) {
+                        iframe.setAttribute('scrolling', 'no');
+                        iframe.setAttribute('tabindex', '-1');
+                    }
+                    
+                    controller.addListener('playback_update', markLoaded);
+                    controller.addListener('ready', markLoaded);
+                    setTimeout(markLoaded, 2000);
                 });
             }, index * 100);
         });
+    };
+
+    window.markPlayerLoaded = function(artistId) {
+        const container = document.querySelector('.artist-player[data-artist-id="' + artistId + '"]');
+        if (container) {
+            container.classList.add('loaded');
+            container.classList.remove('loading');
+        }
     };
 
     setInterval(() => {
@@ -84,38 +99,50 @@ st.html("""
             const trackId = btn.dataset.trackId;
             const artistId = btn.dataset.artistId;
             const controller = window.artistControllers[artistId];
+            const container = document.querySelector('.artist-player[data-artist-id="' + artistId + '"]');
 
             if (controller && trackId) {
-                // Pause the previously playing controller and refresh its view
+                // Reset previous artist's player (silent, no visual feedback)
                 if (window.currentArtistId && window.currentArtistId !== artistId) {
                     const prev = window.artistControllers[window.currentArtistId];
                     if (prev) {
                         prev.pause();
-                        // Reload the SAME track to refresh the embed and avoid nag screen
                         const currentTrack = window.artistCurrentTracks[window.currentArtistId];
-                        if (currentTrack) prev.loadUri('spotify:track:' + currentTrack);
+                        if (currentTrack) {
+                            prev.loadUri('spotify:track:' + currentTrack);
+                        }
                     }
                 }
 
                 const isSameTrack = (window.currentTrackId === trackId && window.currentArtistId === artistId);
                 
                 if (isSameTrack) {
-                    // Toggle play/pause for same track
                     controller.togglePlay();
                     btn.classList.toggle('playing');
                 } else {
-                    // New track: load and play
-                    window.currentArtistId = artistId;
-                    window.currentTrackId = trackId;
-                    
-                    controller.loadUri('spotify:track:' + trackId);
-                    controller.play();
-                    
-                    // Track what this artist is now showing
-                    window.artistCurrentTracks[artistId] = trackId;
+                    const isTrackAlreadyLoaded = window.artistCurrentTracks[artistId] === trackId;
                     
                     document.querySelectorAll('.track-btn.playing').forEach(el => el.classList.remove('playing'));
                     btn.classList.add('playing');
+                    
+                    window.currentArtistId = artistId;
+                    window.currentTrackId = trackId;
+                    
+                    if (isTrackAlreadyLoaded) {
+                        controller.play();
+                    } else {
+                        if (container) {
+                            container.classList.add('loading');
+                            container.classList.remove('loaded');
+                        }
+                        
+                        controller.loadUri('spotify:track:' + trackId);
+                        controller.play();
+                        
+                        window.artistCurrentTracks[artistId] = trackId;
+                        // Fallback timeout for consistent skeleton
+                        setTimeout(() => window.markPlayerLoaded(artistId), 800);
+                    }
                 }
             }
         });
@@ -193,6 +220,12 @@ st.markdown("""
         font-weight: 600;
     }
 
+    /* Skeleton loader animation */
+    @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+    }
+
     /* Artist Stats/Player Container */
     .artist-player {
         margin-bottom: 0.5rem;
@@ -200,14 +233,62 @@ st.markdown("""
         overflow: hidden;
         background: #121212;
         min-height: 80px;
-        /* Ensure proper clipping */
+        height: 80px;
         isolation: isolate;
+        position: relative;
     }
+    
+    /* Skeleton loader - shown by default */
+    .artist-player::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 12px;
+        background: linear-gradient(
+            90deg,
+            #181818 0%,
+            #2e2e2e 40%,
+            #4a4a4a 50%,
+            #2e2e2e 60%,
+            #181818 100%
+        );
+        background-size: 200% 100%;
+        animation: shimmer 1.8s ease-in-out infinite;
+        z-index: 1;
+        opacity: 1;
+        transition: opacity 0.3s ease-out;
+        pointer-events: none;
+    }
+    
+    /* Hide skeleton when loaded */
+    .artist-player.loaded::before {
+        opacity: 0;
+    }
+    
+    /* Iframe styling */
     .artist-player iframe {
         border-radius: 12px;
         display: block;
         border: none;
         background: #121212;
+        opacity: 0;
+        transition: opacity 0.3s ease-out;
+        scrollbar-width: none; /* Firefox */
+    }
+    .artist-player iframe::-webkit-scrollbar {
+        display: none; /* Chrome/Safari */
+    }
+    
+    .artist-player.loaded iframe {
+        opacity: 1;
+    }
+    
+    /* Loading state during track change */
+    .artist-player.loading::before {
+        opacity: 1;
+    }
+    .artist-player.loading iframe {
+        opacity: 0.3;
     }
 
     /* Compact Track buttons */
@@ -572,7 +653,7 @@ def main():
         for artist, tracks in recs.items():
             aid = get_artist_id(artist)
             first_track = tracks[0][0] if tracks else ""
-            player_div = f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"></div>'
+            player_div = f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"><div class="player-target"></div></div>'
             buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
             grid_items += f'<div class="auto-grid-card"><h3>{artist}</h3>{player_div}{buttons}</div>'
         st.markdown(f'<div class="auto-grid">{grid_items}</div>', unsafe_allow_html=True)
@@ -582,7 +663,7 @@ def main():
                 st.markdown(f"### {artist}")
                 aid = get_artist_id(artist)
                 first_track = tracks[0][0] if tracks else ""
-                st.markdown(f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"><div class="player-target"></div></div>', unsafe_allow_html=True)
                 buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
                 st.markdown(buttons, unsafe_allow_html=True)
     else:
@@ -594,7 +675,7 @@ def main():
                     st.markdown(f"### {artist}")
                     aid = get_artist_id(artist)
                     first_track = tracks[0][0] if tracks else ""
-                    st.markdown(f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"><div class="player-target"></div></div>', unsafe_allow_html=True)
                     buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
                     st.markdown(buttons, unsafe_allow_html=True)
 
