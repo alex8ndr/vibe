@@ -567,14 +567,7 @@ def main():
     if 'last_params' not in st.session_state:
         st.session_state.last_params = None
 
-    df = load_data()
-    # Sort artists by popularity (most popular first)
-    artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
-    artists_list = artist_popularity.index.tolist()
-
-    # Sidebar
     with st.sidebar:
-        # Check if logo exists
         if os.path.exists("alext_dev_logo.svg"):
             st.logo("alext_dev_logo.svg", size="large", link="https://alext.dev", icon_image="Vibe Banner.png")
             
@@ -583,6 +576,22 @@ def main():
             st.markdown(f'<img src="data:image/png;base64,{logo}" class="sidebar-logo">', unsafe_allow_html=True)
         else:
             st.title("Vibe")
+
+    # Welcome Message check
+    current_selection = st.session_state.get("selected_artists", [])
+    if not current_selection:
+        st.session_state.recommendations = {}
+        st.session_state.last_params = None
+        st.title("Vibe")
+        st.markdown("**Discover new music based on artists you love.**")
+        st.markdown("Select artists in the sidebar to get started.")
+
+    df = load_data()
+    # Sort artists by popularity (most popular first)
+    artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
+    artists_list = artist_popularity.index.tolist()
+
+    with st.sidebar:
         
         # Settings at top, collapsed by default
         with st.expander("Settings", expanded=False):
@@ -600,7 +609,8 @@ def main():
             artists_list,
             max_selections=5,
             placeholder="Type to search...",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="selected_artists"
         )
         
         # Render button in the placeholder (now we have the selected_artists state)
@@ -636,9 +646,6 @@ def main():
         # Clear results when all artists are removed
         st.session_state.recommendations = {}
         st.session_state.last_params = None
-        st.title("Vibe")
-        st.markdown("**Discover new music based on artists you love.**")
-        st.markdown("Select artists in the sidebar to get started.")
         return
     
     params = {
@@ -649,7 +656,7 @@ def main():
     }
     
     if search and st.session_state.last_params != params:
-        with st.spinner("Finding recommendations..."):
+        with st.spinner("Generating recommendations..."):
             features = get_combined_features(df, selected_artists, selected_tracks)
             if features is not None:
                 recs = generate_recommendations(df, selected_artists, features, diversity, max_results)
@@ -665,7 +672,7 @@ def main():
         if search:
             st.warning("No recommendations found. Try different artists.")
         else:
-            st.info("Click **Find Music** to get recommendations.")
+            st.info("Click **Find Music** to generate recommendations.")
         return
     
     # Check if current params differ from last search
