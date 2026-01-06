@@ -91,6 +91,9 @@ st.html("""
         if (window.SpotifyAPI) window.initPlayers();
     }, 1000);
 
+    // Track which players need a full reset (to clear nag screen)
+    window.artistNeedsReset = window.artistNeedsReset || {};
+
     if (!window.vibeClickHandler) {
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('.track-btn');
@@ -102,15 +105,28 @@ st.html("""
             const container = document.querySelector('.artist-player[data-artist-id="' + artistId + '"]');
 
             if (controller && trackId) {
-                // Reset previous artist's player (silent, no visual feedback)
+                // Handle previous artist: reset with skeleton overlay masking
                 if (window.currentArtistId && window.currentArtistId !== artistId) {
-                    const prev = window.artistControllers[window.currentArtistId];
-                    if (prev) {
+                    const prevArtistId = window.currentArtistId;
+                    const prev = window.artistControllers[prevArtistId];
+                    const prevContainer = document.querySelector('.artist-player[data-artist-id="' + prevArtistId + '"]');
+                    if (prev && prevContainer) {
                         prev.pause();
-                        const currentTrack = window.artistCurrentTracks[window.currentArtistId];
-                        if (currentTrack) {
-                            prev.loadUri('spotify:track:' + currentTrack);
+                        // Show skeleton overlay to mask the reset glitch
+                        prevContainer.classList.add('resetting');
+                        prevContainer.classList.remove('loaded');
+                        
+                        // Reset the player to clean state
+                        const resetTrack = window.artistCurrentTracks[prevArtistId];
+                        if (resetTrack) {
+                            prev.loadUri('spotify:track:' + resetTrack);
                         }
+                        
+                        // Mark as loaded after reset completes
+                        setTimeout(() => {
+                            prevContainer.classList.remove('resetting');
+                            prevContainer.classList.add('loaded');
+                        }, 600);
                     }
                 }
 
@@ -129,9 +145,11 @@ st.html("""
                     window.currentTrackId = trackId;
                     
                     if (isTrackAlreadyLoaded) {
+                        container.classList.remove('resetting');
                         controller.play();
                     } else {
                         if (container) {
+                            container.classList.remove('resetting');
                             container.classList.add('loading');
                             container.classList.remove('loaded');
                         }
@@ -140,7 +158,7 @@ st.html("""
                         controller.play();
                         
                         window.artistCurrentTracks[artistId] = trackId;
-                        // Fallback timeout for consistent skeleton
+                        
                         setTimeout(() => window.markPlayerLoaded(artistId), 800);
                     }
                 }
@@ -276,6 +294,10 @@ st.markdown("""
         opacity: 0;
         transition: opacity 0.3s ease-out;
         scrollbar-width: none; /* Firefox */
+        width: 100% !important;
+        height: 80px !important;
+        min-height: 80px !important;
+        max-height: 80px !important;
     }
     .artist-player iframe::-webkit-scrollbar {
         display: none; /* Chrome/Safari */
@@ -290,6 +312,14 @@ st.markdown("""
         opacity: 1;
     }
     .artist-player.loading iframe {
+        opacity: 0.3;
+    }
+    
+    /* Resetting state - semi-transparent skeleton to mask glitches during background reset */
+    .artist-player.resetting::before {
+        opacity: 0.8;
+    }
+    .artist-player.resetting iframe {
         opacity: 0.3;
     }
 
@@ -333,20 +363,30 @@ st.markdown("""
     }
     .track-btn::before {
         content: '♫';
-        font-size: 1.1rem;
+        font-size: 1rem;
         opacity: 0.5;
+        min-width: 24px;
         width: 24px;
-        text-align: center;
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
     }
     .track-btn:hover::before {
         content: '▶';
+        font-size: 1.1rem;
         color: var(--accent-color, #1db954);
         opacity: 1;
+        transform: translateY(1px);
     }
     .track-btn.playing::before {
-        content: 'll';
+        content: '❚❚';
         color: white;
         opacity: 1;
+        font-size: 0.8rem;
+        letter-spacing: -1px;
+        transform: translateY(1px);
     }
 </style>
 """, unsafe_allow_html=True)
