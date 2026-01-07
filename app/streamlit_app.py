@@ -388,6 +388,76 @@ st.markdown("""
         letter-spacing: -1px;
         transform: translateY(1px);
     }
+    
+    /* Hero/Landing Page Styling */
+    .hero-bg {
+        position: fixed;
+        bottom: 0;
+        right: 0;
+        width: 1000px;
+        height: 100vh;
+        background-size: cover;
+        background-position: right bottom;
+        mask-image: linear-gradient(to right, transparent 0%, black 50%);
+        -webkit-mask-image: linear-gradient(to right, transparent 0%, black 50%);
+        z-index: 0;
+        pointer-events: none;
+    }
+    
+    .landing-content {
+        position: relative;
+        z-index: 1;
+        max-width: 500px;
+        padding-top: 15vh;
+        pointer-events: none;
+    }
+    .landing-text-inner {
+        position: relative;
+        width: fit-content;
+        pointer-events: auto;
+    }
+    .landing-text-inner::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 0%;
+        transform: translate(-50%, -50%);
+        width: 300%;
+        height: 300%;
+        z-index: -1;
+        border-radius: 50%;
+        filter: blur(40px);
+        -webkit-filter: blur(40px);
+        background: radial-gradient(circle at center, #0e1117 0%, #0e1117 80%, transparent 100%);
+        
+    }
+    .st-theme-light .landing-text-inner::before {
+        background: radial-gradient(circle at center, #ffffff 0%, #ffffff 80%, transparent 100%);
+    }
+    .landing-title {
+        font-size: 4.5rem;
+        font-weight: 800;
+        margin: 0;
+        letter-spacing: -2px;
+        line-height: 1;
+        color: #fff;
+    }
+    .st-theme-light .landing-title { color: #111; }
+    .landing-subtitle {
+        font-size: 1.35rem;
+        margin-top: 1.5rem;
+        margin-bottom: 2.5rem;
+        font-weight: 400;
+        line-height: 1.5;
+        color: #999;
+    }
+    .st-theme-light .landing-subtitle { color: #555; }
+    .arrow-hint {
+        font-size: 1rem;
+        font-weight: 500;
+        color: #666;
+    }
+    .st-theme-light .arrow-hint { color: #888; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -416,6 +486,32 @@ def load_logo():
                 return base64.b64encode(f.read()).decode("utf-8")
     except Exception:
         pass
+    return None
+
+
+@st.cache_data
+def load_hero_image(theme="dark"):
+    """Load hero image for the specified theme (dark/light) with fallback."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Try themed version first
+    themed_path = os.path.join(base_dir, f"hero_image_{theme}.png")
+    if os.path.exists(themed_path):
+        try:
+            with open(themed_path, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+        except Exception:
+            pass
+    
+    # Fallback to generic hero_image.png
+    fallback_path = os.path.join(base_dir, "hero_image.png")
+    if os.path.exists(fallback_path):
+        try:
+            with open(fallback_path, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+        except Exception:
+            pass
+    
     return None
 
 
@@ -582,9 +678,35 @@ def main():
     if not current_selection:
         st.session_state.recommendations = {}
         st.session_state.last_params = None
-        st.title("Vibe")
-        st.markdown("**Discover new music based on artists you love.**")
-        st.markdown("Select artists in the sidebar to get started.")
+        
+        # Detect Streamlit's actual theme
+        theme = "dark"  # default
+        try:
+            theme = st.context.theme.type  # "dark" or "light"
+        except:
+            pass
+        
+        # Load hero image for current theme
+        hero_b64 = load_hero_image(theme)
+        
+        theme_class = f"st-theme-{theme}"
+        
+        st.markdown(f"""
+        <div class="hero-bg" style="background-image: url('data:image/png;base64,{hero_b64}');"></div>
+        
+        <div class="landing-content {theme_class}">
+            <div class="landing-text-inner">
+                <h1 class="landing-title">Vibe</h1>
+                <p class="landing-subtitle">
+                    Discover new music based on<br>
+                    the artists you already love.
+                </p>
+                <div class="arrow-hint">
+                    <span>←</span> Select artists to start
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
     df = load_data()
     # Sort artists by popularity (most popular first)
@@ -595,7 +717,7 @@ def main():
         
         # Settings at top, collapsed by default
         with st.expander("Settings", expanded=False):
-            max_results = st.slider("Max artists", 1, 8, 6)
+            max_results = st.slider("Max recommended artists", 3, 9, 6)
             diversity = st.slider("Diversity", 1, 5, 2, help="Higher = more variety")
             columns = st.pills("Columns", ["Auto", "1", "2", "3"], default="Auto")
         
