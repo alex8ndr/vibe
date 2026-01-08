@@ -469,8 +469,8 @@ st.markdown("""
         top: 50%;
         left: 0%;
         transform: translate(-50%, -50%);
-        width: 300%;
-        height: 300%;
+        width: 800px;
+        height: 800px;
         z-index: -1;
         border-radius: 50%;
         filter: blur(40px);
