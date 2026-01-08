@@ -260,8 +260,8 @@ st.markdown("""
     /* Fixed loading indicator - matches inline-info style */
     .fixed-loading {
         position: fixed;
-        top: 1rem;
-        left: calc(var(--sidebar-width, 21rem) + 2rem);
+        top: 10px;
+        left: 120px;
         z-index: 999999;
         display: inline-flex;
         align-items: center;
@@ -272,7 +272,7 @@ st.markdown("""
         border-radius: 0.375rem;
         font-size: 0.875rem;
         font-weight: 500;
-        backdrop-filter: blur(8px);
+        backdrop-filter: blur(80px);
     }
     .fixed-loading::before {
         content: '';
@@ -870,12 +870,17 @@ def main():
         }
         params_changed = st.session_state.last_params != params
         
-        # Generate new recommendations if search clicked with new params
-        if search and params_changed:
+        # Generate new recommendations if search clicked
+        if search:
+            # Boost diversity for repeat searches with same params
+            effective_diversity = diversity
+            if not params_changed:
+                effective_diversity = min(diversity + 2, 5)
+            
             st.session_state.pending_generation = {
                 'artists': selected_artists,
                 'tracks': selected_tracks,
-                'diversity': diversity,
+                'diversity': effective_diversity,
                 'max_results': max_results,
                 'selection_dict': selection_dict
             }
@@ -887,7 +892,7 @@ def main():
     
     # First search with no existing recs - show loading and execute
     if is_generating and not recs:
-        st.markdown('<div class="fixed-loading">Generating recommendations</div>', unsafe_allow_html=True)
+        st.markdown('<div class="fixed-loading">Generating</div>', unsafe_allow_html=True)
         if pending:
             features = get_combined_features(df, pending['artists'], pending['tracks'])
             if features is not None:
