@@ -14,7 +14,7 @@ except ImportError:
 
 st.set_page_config(
     page_title='Vibe',
-    page_icon='Vibe Icon.png',
+    page_icon='vibe_icon.png',
     layout='wide',
     initial_sidebar_state='expanded',
 )
@@ -534,7 +534,7 @@ def get_artists_list(_df):
 def load_logo():
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        logo_path = os.path.join(base_dir, "Vibe Banner.png")
+        logo_path = os.path.join(base_dir, "vibe_banner.png")
         if os.path.exists(logo_path):
             with open(logo_path, "rb") as f:
                 return base64.b64encode(f.read()).decode("utf-8")
@@ -736,7 +736,7 @@ def main():
 
     with st.sidebar:
         if os.path.exists("alext_dev_logo.svg"):
-            st.logo("alext_dev_logo.svg", size="large", link="https://alext.dev", icon_image="Vibe Banner.png")
+            st.logo("alext_dev_logo.svg", size="large", link="https://alext.dev", icon_image="vibe_banner.png")
             
         logo = load_logo()
         if logo:
