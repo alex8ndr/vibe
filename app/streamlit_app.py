@@ -231,23 +231,6 @@ st.markdown("""
         border-radius: 0.375rem;
         font-size: 0.875rem;
     }
-    
-    /* Inline info with spinner */
-    .inline-info.with-spinner {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-    .inline-info.with-spinner::before {
-        content: '';
-        width: 14px;
-        height: 14px;
-        border: 2px solid rgba(28, 131, 225, 0.3);
-        border-top-color: rgb(28, 131, 225);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-        flex-shrink: 0;
-    }
 
     /* Header text */
     .header-text {
@@ -255,36 +238,6 @@ st.markdown("""
         align-items: center;
         height: 38px;
         font-weight: 600;
-    }
-    
-    /* Fixed loading indicator - matches inline-info style */
-    .fixed-loading {
-        position: fixed;
-        top: 10px;
-        left: 120px;
-        z-index: 999999;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        background-color: rgba(28, 131, 225, 0.1);
-        color: rgb(28, 131, 225);
-        padding: 0.5rem 1rem;
-        border-radius: 0.375rem;
-        font-size: 0.875rem;
-        font-weight: 500;
-        backdrop-filter: blur(80px);
-    }
-    .fixed-loading::before {
-        content: '';
-        width: 14px;
-        height: 14px;
-        border: 2px solid rgba(28, 131, 225, 0.3);
-        border-top-color: rgb(28, 131, 225);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin {
-        to { transform: rotate(360deg); }
     }
 
     /* Skeleton loader animation */
@@ -524,19 +477,6 @@ def load_data():
 
 
 @st.cache_data
-def get_numeric_matrix(_df):
-    """Pre-extract numeric columns as numpy array for faster cdist."""
-    return _df.select_dtypes(include=np.number).values
-
-
-@st.cache_data
-def get_artists_list(_df):
-    """Get artists sorted by popularity (cached)."""
-    artist_popularity = _df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
-    return artist_popularity.index.tolist()
-
-
-@st.cache_data
 def load_logo():
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -576,29 +516,23 @@ def load_hero_image(theme="dark"):
 
 
 def save_input_artists(artists_songs):
-    """Save input to Google Sheets in background (non-blocking)."""
     if not GSHEETS_AVAILABLE:
         return
-    
-    import threading
-    def _save():
-        try:
-            conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
-            sheet = conn.read(worksheet="Data", usecols=list(range(21)), ttl=0)
-            
-            new_row = [datetime.now().strftime("%Y%m%d-%H%M%S")]
-            for artist, songs in artists_songs.items():
-                new_row += [artist] + songs + [None] * (3 - len(songs))
-            new_row += [None] * (len(sheet.columns) - len(new_row))
-            
-            new_row_df = pd.DataFrame([new_row], columns=sheet.columns)
-            sheet = sheet.dropna(how="all")
-            sheet = pd.concat([sheet, new_row_df], ignore_index=True)
-            conn.update(worksheet="Data", data=sheet)
-        except Exception:
-            pass
-    
-    threading.Thread(target=_save, daemon=True).start()
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+        sheet = conn.read(worksheet="Data", usecols=list(range(21)), ttl=0)
+        
+        new_row = [datetime.now().strftime("%Y%m%d-%H%M%S")]
+        for artist, songs in artists_songs.items():
+            new_row += [artist] + songs + [None] * (3 - len(songs))
+        new_row += [None] * (len(sheet.columns) - len(new_row))
+        
+        new_row_df = pd.DataFrame([new_row], columns=sheet.columns)
+        sheet = sheet.dropna(how="all")
+        sheet = pd.concat([sheet, new_row_df], ignore_index=True)
+        conn.update(worksheet="Data", data=sheet)
+    except Exception:
+        pass
 
 
 def get_combined_features(df, artists, track_ids):
@@ -621,10 +555,11 @@ def get_combined_features(df, artists, track_ids):
     return np.mean(combined, axis=0).reshape(1, -1)
 
 
-def generate_recommendations(df, numeric_matrix, input_artists, features, diversity, max_artists):
+def generate_recommendations(df, input_artists, features, diversity, max_artists):
     n = 100 * diversity
     
-    distances = cdist(features, numeric_matrix, metric="euclidean")[0]
+    numeric_cols = df.select_dtypes(include=np.number)
+    distances = cdist(features, numeric_cols.values, metric="euclidean")[0]
     similar_indices = distances.argsort()[:n]
     
     similar_songs = df.iloc[similar_indices].copy()
@@ -755,25 +690,23 @@ def main():
         else:
             st.title("Vibe")
 
-    # Get current state
+    # Welcome Message check
     current_selection = st.session_state.get("selected_artists", [])
-    recs = st.session_state.get('recommendations', {})
-    
-    # Show hero page if no recommendations yet
-    if not recs:
-        theme = "dark"
+    if not current_selection:
+        st.session_state.recommendations = {}
+        st.session_state.last_params = None
+        
+        # Detect Streamlit's actual theme
+        theme = "dark"  # default
         try:
-            theme = st.context.theme.type
+            theme = st.context.theme.type  # "dark" or "light"
         except:
             pass
         
+        # Load hero image for current theme
         hero_b64 = load_hero_image(theme)
-        theme_class = f"st-theme-{theme}"
         
-        if current_selection:
-            hint_html = '<div class="inline-info">Click <b>Find Music</b> for recommendations</div>'
-        else:
-            hint_html = '<div class="arrow-hint"><span>←</span> Select artists to start</div>'
+        theme_class = f"st-theme-{theme}"
         
         st.markdown(f"""
         <div class="hero-bg" style="background-image: url('data:image/png;base64,{hero_b64}');"></div>
@@ -785,14 +718,17 @@ def main():
                     Discover new music based on<br>
                     the artists you already love.
                 </p>
-                {hint_html}
+                <div class="arrow-hint">
+                    <span>←</span> Select artists to start
+                </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     df = load_data()
-    numeric_matrix = get_numeric_matrix(df)
-    artists_list = get_artists_list(df)
+    # Sort artists by popularity (most popular first)
+    artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
+    artists_list = artist_popularity.index.tolist()
 
     with st.sidebar:
         
@@ -860,90 +796,68 @@ def main():
 
 
     # Main content
-    recs = st.session_state.recommendations
-    
-    # Persist settings to query params when changed (lightweight, no overhead)
     if st.session_state.get('settings_changed'):
         st.query_params['max'] = str(st.session_state.get('setting_max_results', 6))
         st.query_params['div'] = str(st.session_state.get('setting_diversity', 2))
         st.query_params['cols'] = st.session_state.get('setting_columns', 'Auto')
         st.session_state.settings_changed = False
-    
-    # Build params and generate recommendations if artists selected
-    params = None
-    params_changed = False
-    
-    if current_selection:
-        params = {
-            'artists': tuple(sorted(selected_artists)),
-            'tracks': tuple(sorted(selected_tracks)),
-            'diversity': diversity,
-            'max': max_results
-        }
-        params_changed = st.session_state.last_params != params
-        
-        # Generate new recommendations if search clicked
-        if search:
-            # Boost diversity for repeat searches with same params
-            effective_diversity = diversity
-            if not params_changed:
-                effective_diversity = min(diversity + 2, 5)
-            
-            st.session_state.pending_generation = {
-                'artists': selected_artists,
-                'tracks': selected_tracks,
-                'diversity': effective_diversity,
-                'max_results': max_results,
-                'selection_dict': selection_dict
-            }
-            st.session_state.is_generating = True
-            st.rerun()
-    
-    pending = st.session_state.get('pending_generation')
-    is_generating = st.session_state.get('is_generating', False)
-    
-    # First search with no existing recs - show loading and execute
-    if is_generating and not recs:
-        st.markdown('<div class="fixed-loading">Generating</div>', unsafe_allow_html=True)
-        if pending:
-            features = get_combined_features(df, pending['artists'], pending['tracks'])
-            if features is not None:
-                new_recs = generate_recommendations(df, numeric_matrix, pending['artists'], features, pending['diversity'], pending['max_results'])
-                st.session_state.recommendations = new_recs
-                st.session_state.last_params = {
-                    'artists': tuple(sorted(pending['artists'])),
-                    'tracks': tuple(sorted(pending['tracks'])),
-                    'diversity': pending['diversity'],
-                    'max': pending['max_results']
-                }
-                save_input_artists(pending['selection_dict'])
-            st.session_state.pending_generation = None
-            st.session_state.is_generating = False
-            st.rerun()
-    
-    if not recs:
+
+    if not selected_artists:
+        # Clear results when all artists are removed
+        st.session_state.recommendations = {}
+        st.session_state.last_params = None
         return
     
-    # Results header
+    params = {
+        'artists': tuple(sorted(selected_artists)),
+        'tracks': tuple(sorted(selected_tracks)),
+        'diversity': diversity,
+        'max': max_results
+    }
+    
+    if search:
+        with st.spinner("Generating recommendations..."):
+            features = get_combined_features(df, selected_artists, selected_tracks)
+            if features is not None:
+                effective_diversity = diversity
+                if st.session_state.last_params == params:
+                    effective_diversity = min(diversity + 2, 5)
+                recs = generate_recommendations(df, selected_artists, features, effective_diversity, max_results)
+                st.session_state.recommendations = recs
+                st.session_state.last_params = params
+                save_input_artists(selection_dict)
+                # Force a rerun to stabilize DOM before user interacts
+                st.rerun()
+    
+    recs = st.session_state.recommendations
+    
+    if not recs:
+        if search:
+            st.warning("No recommendations found. Try different artists.")
+        else:
+            st.info("Click **Find Music** to generate recommendations.")
+        return
+    
+    # Check if current params differ from last search
+    params_changed = st.session_state.last_params != params
+    
+    # Results header with download
     col1, col2 = st.columns([3, 1])
     with col1:
-        if is_generating:
-            st.markdown('<div class="inline-info with-spinner">Generating recommendations</div>', unsafe_allow_html=True)
-        elif current_selection and params_changed:
+        if params_changed:
             st.markdown('<div class="inline-info">Click <b>Find Music</b> to update results</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="header-text">Click on a track to play</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="header-text">{len(recs)} artists based on your selection</div>', unsafe_allow_html=True)
     with col2:
-        if recs:
-            input_artists = st.session_state.last_params['artists'] if st.session_state.last_params else selected_artists
-            st.download_button(
-                "Download",
-                data=lambda: generate_html(input_artists, recs),
-                file_name=f"vibe_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
-                mime="text/html",
-                use_container_width=True,
-                key="download_results"
-            )
+        input_artists = st.session_state.last_params['artists'] if st.session_state.last_params else selected_artists
+        st.download_button(
+            "Download",
+            data=lambda: generate_html(input_artists, recs),
+            file_name=f"vibe_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+            mime="text/html",
+            use_container_width=True,
+            key="download_results"
+        )
     
     # Display results with track buttons and artist players
     if columns == "Auto":
@@ -976,23 +890,6 @@ def main():
                     st.markdown(f'<div class="artist-player" data-artist-id="{aid}" data-track="{first_track}"><div class="player-target"></div></div>', unsafe_allow_html=True)
                     buttons = "".join([track_button(tid, tname, artist) for tid, tname in tracks])
                     st.markdown(buttons, unsafe_allow_html=True)
-    
-    # Execute pending generation after page is rendered
-    if pending and is_generating:
-        features = get_combined_features(df, pending['artists'], pending['tracks'])
-        if features is not None:
-            new_recs = generate_recommendations(df, numeric_matrix, pending['artists'], features, pending['diversity'], pending['max_results'])
-            st.session_state.recommendations = new_recs
-            st.session_state.last_params = {
-                'artists': tuple(sorted(pending['artists'])),
-                'tracks': tuple(sorted(pending['tracks'])),
-                'diversity': pending['diversity'],
-                'max': pending['max_results']
-            }
-            save_input_artists(pending['selection_dict'])
-        st.session_state.pending_generation = None
-        st.session_state.is_generating = False
-        st.rerun()
 
 
 if __name__ == "__main__":
