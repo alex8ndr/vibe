@@ -524,6 +524,12 @@ def load_data():
 
 
 @st.cache_data
+def get_numeric_matrix(_df):
+    """Pre-extract numeric columns as numpy array for faster cdist."""
+    return _df.select_dtypes(include=np.number).values
+
+
+@st.cache_data
 def get_artists_list(_df):
     """Get artists sorted by popularity (cached)."""
     artist_popularity = _df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
@@ -570,23 +576,29 @@ def load_hero_image(theme="dark"):
 
 
 def save_input_artists(artists_songs):
+    """Save input to Google Sheets in background (non-blocking)."""
     if not GSHEETS_AVAILABLE:
         return
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
-        sheet = conn.read(worksheet="Data", usecols=list(range(21)), ttl=0)
-        
-        new_row = [datetime.now().strftime("%Y%m%d-%H%M%S")]
-        for artist, songs in artists_songs.items():
-            new_row += [artist] + songs + [None] * (3 - len(songs))
-        new_row += [None] * (len(sheet.columns) - len(new_row))
-        
-        new_row_df = pd.DataFrame([new_row], columns=sheet.columns)
-        sheet = sheet.dropna(how="all")
-        sheet = pd.concat([sheet, new_row_df], ignore_index=True)
-        conn.update(worksheet="Data", data=sheet)
-    except Exception:
-        pass
+    
+    import threading
+    def _save():
+        try:
+            conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
+            sheet = conn.read(worksheet="Data", usecols=list(range(21)), ttl=0)
+            
+            new_row = [datetime.now().strftime("%Y%m%d-%H%M%S")]
+            for artist, songs in artists_songs.items():
+                new_row += [artist] + songs + [None] * (3 - len(songs))
+            new_row += [None] * (len(sheet.columns) - len(new_row))
+            
+            new_row_df = pd.DataFrame([new_row], columns=sheet.columns)
+            sheet = sheet.dropna(how="all")
+            sheet = pd.concat([sheet, new_row_df], ignore_index=True)
+            conn.update(worksheet="Data", data=sheet)
+        except Exception:
+            pass
+    
+    threading.Thread(target=_save, daemon=True).start()
 
 
 def get_combined_features(df, artists, track_ids):
@@ -609,11 +621,10 @@ def get_combined_features(df, artists, track_ids):
     return np.mean(combined, axis=0).reshape(1, -1)
 
 
-def generate_recommendations(df, input_artists, features, diversity, max_artists):
+def generate_recommendations(df, numeric_matrix, input_artists, features, diversity, max_artists):
     n = 100 * diversity
     
-    numeric_cols = df.select_dtypes(include=np.number)
-    distances = cdist(features, numeric_cols.values, metric="euclidean")[0]
+    distances = cdist(features, numeric_matrix, metric="euclidean")[0]
     similar_indices = distances.argsort()[:n]
     
     similar_songs = df.iloc[similar_indices].copy()
@@ -780,6 +791,7 @@ def main():
         """, unsafe_allow_html=True)
 
     df = load_data()
+    numeric_matrix = get_numeric_matrix(df)
     artists_list = get_artists_list(df)
 
     with st.sidebar:
@@ -896,7 +908,7 @@ def main():
         if pending:
             features = get_combined_features(df, pending['artists'], pending['tracks'])
             if features is not None:
-                new_recs = generate_recommendations(df, pending['artists'], features, pending['diversity'], pending['max_results'])
+                new_recs = generate_recommendations(df, numeric_matrix, pending['artists'], features, pending['diversity'], pending['max_results'])
                 st.session_state.recommendations = new_recs
                 st.session_state.last_params = {
                     'artists': tuple(sorted(pending['artists'])),
@@ -969,7 +981,7 @@ def main():
     if pending and is_generating:
         features = get_combined_features(df, pending['artists'], pending['tracks'])
         if features is not None:
-            new_recs = generate_recommendations(df, pending['artists'], features, pending['diversity'], pending['max_results'])
+            new_recs = generate_recommendations(df, numeric_matrix, pending['artists'], features, pending['diversity'], pending['max_results'])
             st.session_state.recommendations = new_recs
             st.session_state.last_params = {
                 'artists': tuple(sorted(pending['artists'])),
