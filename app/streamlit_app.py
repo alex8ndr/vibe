@@ -535,6 +535,30 @@ def save_input_artists(artists_songs):
         pass
 
 
+FEATURE_WEIGHTS = {
+    'popularity': 0.6,
+    'year': 0.8,
+    'duration_ms': 0.4,
+    'acousticness': 1.2,
+    'danceability': 1.2,
+    'energy': 1.2,
+    'valence': 1.2,
+    'instrumentalness': 1.2,
+    'speechiness': 1.0,
+    'loudness': 1.0,
+    'tempo': 1.0,
+    'liveness': 1.0,
+}
+
+@st.cache_data
+def get_numeric_matrix(_df):
+    numeric_df = _df.select_dtypes(include=np.number).copy()
+    for col, weight in FEATURE_WEIGHTS.items():
+        if col in numeric_df.columns:
+            numeric_df[col] = numeric_df[col] * weight
+    return numeric_df.values.astype(np.float32)
+
+
 def get_combined_features(df, artists, track_ids):
     all_features = []
     
@@ -552,14 +576,23 @@ def get_combined_features(df, artists, track_ids):
         return None
     
     combined = np.concatenate(all_features, axis=0)
-    return np.mean(combined, axis=0).reshape(1, -1)
+    avg_vector = np.mean(combined, axis=0)
+    
+    # Apply weights to query vector
+    numeric_cols = df.select_dtypes(include=np.number).columns
+    weighted_vector = avg_vector.copy()
+    for i, col in enumerate(numeric_cols):
+        if col in FEATURE_WEIGHTS:
+            weighted_vector[i] *= FEATURE_WEIGHTS[col]
+            
+    return weighted_vector.reshape(1, -1)
 
 
 def generate_recommendations(df, input_artists, features, diversity, max_artists):
     n = 100 * diversity
     
-    numeric_cols = df.select_dtypes(include=np.number)
-    distances = cdist(features, numeric_cols.values, metric="euclidean")[0]
+    numeric_matrix = get_numeric_matrix(df)
+    distances = cdist(features, numeric_matrix, metric="euclidean")[0]
     similar_indices = distances.argsort()[:n]
     
     similar_songs = df.iloc[similar_indices].copy()
@@ -580,7 +613,6 @@ def generate_recommendations(df, input_artists, features, diversity, max_artists
     recommendations = {}
     for artist in qualified.head(max_artists).index:
         artist_tracks = pool[pool['artist_name'] == artist].sort_values('score', ascending=False).head(4)
-        # Store both track_id and track_name
         tracks = [(row['track_id'], row['track_name']) for _, row in artist_tracks.iterrows()]
         recommendations[artist] = tracks
     
@@ -692,10 +724,10 @@ def main():
 
     # Welcome Message check
     current_selection = st.session_state.get("selected_artists", [])
-    if not current_selection:
-        st.session_state.recommendations = {}
-        st.session_state.last_params = None
-        
+    has_results = bool(st.session_state.get('recommendations'))
+    
+    # Only show hero if no artists AND no previous results
+    if not current_selection and not has_results:
         # Detect Streamlit's actual theme
         theme = "dark"  # default
         try:
@@ -803,48 +835,44 @@ def main():
         st.session_state.settings_changed = False
 
     if not selected_artists:
-        # Clear results when all artists are removed
-        st.session_state.recommendations = {}
-        st.session_state.last_params = None
-        return
-    
-    params = {
-        'artists': tuple(sorted(selected_artists)),
-        'tracks': tuple(sorted(selected_tracks)),
-        'diversity': diversity,
-        'max': max_results
-    }
-    
-    if search:
-        with st.spinner("Generating recommendations..."):
-            features = get_combined_features(df, selected_artists, selected_tracks)
-            if features is not None:
-                effective_diversity = diversity
-                if st.session_state.last_params == params:
-                    effective_diversity = min(diversity + 2, 5)
-                recs = generate_recommendations(df, selected_artists, features, effective_diversity, max_results)
-                st.session_state.recommendations = recs
-                st.session_state.last_params = params
-                save_input_artists(selection_dict)
-                # Force a rerun to stabilize DOM before user interacts
-                st.rerun()
+        # No artists selected - skip search logic but still render results below
+        pass
+    else:
+        params = {
+            'artists': tuple(sorted(selected_artists)),
+            'tracks': tuple(sorted(selected_tracks)),
+            'diversity': diversity,
+            'max': max_results
+        }
+        
+        if search:
+            with st.spinner("Generating recommendations..."):
+                features = get_combined_features(df, selected_artists, selected_tracks)
+                if features is not None:
+                    effective_diversity = diversity
+                    if st.session_state.last_params == params:
+                        effective_diversity = min(diversity + 2, 5)
+                    recs = generate_recommendations(df, selected_artists, features, effective_diversity, max_results)
+                    st.session_state.recommendations = recs
+                    st.session_state.last_params = params
+                    save_input_artists(selection_dict)
+                    st.rerun()
     
     recs = st.session_state.recommendations
     
     if not recs:
-        if search:
-            st.warning("No recommendations found. Try different artists.")
-        else:
-            st.info("Click **Find Music** to generate recommendations.")
+        if not selected_artists:
+            return  # No artists and no results - already showing hero
+        st.info("Click **Find Music** to generate recommendations.")
         return
     
     # Check if current params differ from last search
-    params_changed = st.session_state.last_params != params
+    params_changed = selected_artists and st.session_state.last_params != params if 'params' in dir() else True
     
     # Results header with download
     col1, col2 = st.columns([3, 1])
     with col1:
-        if params_changed:
+        if params_changed and selected_artists:
             st.markdown('<div class="inline-info">Click <b>Find Music</b> to update results</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="header-text">{len(recs)} artists based on your selection</div>', unsafe_allow_html=True)
