@@ -515,19 +515,49 @@ def load_hero_image(theme="dark"):
     return None
 
 
-def save_input_artists(artists_songs):
+def save_search(input_artists, input_tracks_dict, recommendations):
+    """Save search input and results to Google Sheets.
+    Format: timestamp | input_artists | input_tracks | results
+    Tracks format: track_name|track_id
+    Results format: artist:track_name|track_id,track_name|track_id;artist2:...
+    """
     if not GSHEETS_AVAILABLE:
         return
     try:
         conn = st.connection("gsheets", type=GSheetsConnection, ttl=0)
-        sheet = conn.read(worksheet="Data", usecols=list(range(21)), ttl=0)
+        sheet = conn.read(worksheet="Data", ttl=0)
         
-        new_row = [datetime.now().strftime("%Y%m%d-%H%M%S")]
-        for artist, songs in artists_songs.items():
-            new_row += [artist] + songs + [None] * (3 - len(songs))
-        new_row += [None] * (len(sheet.columns) - len(new_row))
+        # Format input artists
+        input_artists_str = ", ".join(input_artists)
         
-        new_row_df = pd.DataFrame([new_row], columns=sheet.columns)
+        # Format input tracks: artist: track_name|track_id, ...
+        input_tracks_parts = []
+        for artist, songs in input_tracks_dict.items():
+            if songs:
+                input_tracks_parts.append(f"{artist}: {', '.join(songs)}")
+        input_tracks_str = "; ".join(input_tracks_parts) if input_tracks_parts else ""
+        
+        # Format results: artist: track_name|track_id, track_name|track_id; ...
+        results_parts = []
+        for artist, tracks in recommendations.items():
+            track_strs = [f"{name}|{tid}" for tid, name in tracks]
+            results_parts.append(f"{artist}: {', '.join(track_strs)}")
+        results_str = "; ".join(results_parts)
+        
+        # Build row
+        new_row = {
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'input_artists': input_artists_str,
+            'input_tracks': input_tracks_str,
+            'results': results_str
+        }
+        
+        # Ensure columns exist
+        for col in new_row.keys():
+            if col not in sheet.columns:
+                sheet[col] = None
+        
+        new_row_df = pd.DataFrame([new_row])
         sheet = sheet.dropna(how="all")
         sheet = pd.concat([sheet, new_row_df], ignore_index=True)
         conn.update(worksheet="Data", data=sheet)
@@ -655,37 +685,129 @@ def track_button(track_id, track_name, artist_name):
 
 
 def generate_html(input_artists, recommendations):
-    """Generate standalone HTML file with recommendations."""
-    html = '''<!DOCTYPE html>
+    """Generate standalone HTML file with Spotify IFrame API."""
+    # Load SVG icon (much smaller than base64 PNG)
+    icon_svg = ""
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        svg_path = os.path.join(base_dir, "vibe_icon.svg")
+        if os.path.exists(svg_path):
+            with open(svg_path, "r") as f:
+                icon_svg = f.read()
+    except:
+        pass
+    
+    icon_html = f'<span style="display:inline-block;height:32px;width:32px;vertical-align:middle;margin-right:10px;">{icon_svg}</span>' if icon_svg else '🎵 '
+    
+    html = f'''<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vibe Recommendations</title>
 <style>
-:root { --accent: #4A6FA5; --navy: #1E2A4A; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-       max-width: 1200px; margin: 0 auto; padding: 20px; background: #f8f9fa; color: var(--navy); }
-h1 { color: var(--navy); border-bottom: 3px solid var(--accent); padding-bottom: 10px; }
-.input { background: #EEF2F7; padding: 15px; border-radius: 8px; 
-         margin-bottom: 20px; border-left: 4px solid var(--accent); }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-.card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 12px rgba(30,42,74,0.08); 
-        border-top: 3px solid var(--accent); }
-.card h2 { color: var(--navy); margin-top: 0; font-size: 1.2rem; }
-iframe { border-radius: 12px; margin: 8px 0; }
+* {{ box-sizing: border-box; }}
+body {{ 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+    max-width: 1200px; margin: 0 auto; padding: 20px; 
+    background: #0e1117; color: #fafafa;
+}}
+h1 {{ color: #fafafa; border-bottom: 2px solid #1db954; padding-bottom: 10px; display: flex; align-items: center; }}
+.input {{ 
+    background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; 
+    margin-bottom: 20px; border-left: 4px solid #1db954;
+}}
+.grid {{ 
+    display: grid; 
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+    gap: 20px; 
+}}
+.card {{ 
+    background: rgba(255,255,255,0.03); 
+    padding: 20px; border-radius: 12px; 
+    border: 1px solid rgba(255,255,255,0.1);
+}}
+.card h2 {{ color: #fafafa; margin: 0 0 15px 0; font-size: 1.2rem; }}
+.player-container {{ 
+    background: rgba(0,0,0,0.3); 
+    border-radius: 12px; 
+    min-height: 80px; 
+    margin-bottom: 10px;
+}}
+.track-btn {{
+    display: block; width: 100%; padding: 10px 12px;
+    margin: 4px 0; border: none; border-radius: 8px;
+    background: rgba(255,255,255,0.05); color: #fafafa;
+    text-align: left; cursor: pointer; font-size: 14px;
+    transition: background 0.2s;
+}}
+.track-btn:hover {{ background: rgba(29, 185, 84, 0.2); }}
+.track-btn.active {{ background: rgba(29, 185, 84, 0.3); border-left: 3px solid #1db954; }}
 </style>
 </head><body>
-<h1>Vibe Recommendations</h1>'''
+<h1>{icon_html}Vibe Recommendations</h1>'''
     
     html += f'<div class="input"><strong>Based on:</strong> {" • ".join(input_artists)}</div>'
     html += '<div class="grid">'
     
     for artist, tracks in recommendations.items():
-        html += f'<div class="card"><h2>{artist}</h2>'
-        for track_id, track_name in tracks:
-            html += f'<iframe src="https://open.spotify.com/embed/track/{track_id}" width="100%" height="80" frameborder="0"></iframe>'
+        artist_id = artist.replace(" ", "_").replace("'", "").replace('"', '')
+        first_track = tracks[0][0] if tracks else ""
+        
+        html += f'''<div class="card" data-artist="{artist_id}">
+            <h2>{artist}</h2>
+            <div class="player-container" id="player_{artist_id}" data-track="{first_track}"></div>'''
+        
+        for i, (track_id, track_name) in enumerate(tracks):
+            active = 'active' if i == 0 else ''
+            safe_name = track_name.replace('"', '&quot;')
+            html += f'<button class="track-btn {active}" onclick="playTrack(this, \'{track_id}\')">{safe_name}</button>'
+        
         html += '</div>'
     
-    html += '</div></body></html>'
+    html += '</div>'
+    
+    # Add Spotify IFrame API script
+    html += '''
+<script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
+<script>
+const controllers = {};
+
+window.onSpotifyIframeApiReady = (IFrameAPI) => {
+    document.querySelectorAll('.player-container').forEach(container => {
+        const artistId = container.id.replace('player_', '');
+        const trackId = container.dataset.track;
+        
+        IFrameAPI.createController(container, {
+            width: '100%',
+            height: '80',
+            uri: trackId ? 'spotify:track:' + trackId : ''
+        }, (controller) => {
+            controllers[artistId] = controller;
+        });
+    });
+};
+
+let currentArtist = null;
+
+function playTrack(btn, trackId) {
+    const card = btn.closest('.card');
+    const artistId = card.dataset.artist;
+    
+    // Pause previous artist if different
+    if (currentArtist && currentArtist !== artistId && controllers[currentArtist]) {
+        controllers[currentArtist].pause();
+    }
+    
+    if (controllers[artistId]) {
+        controllers[artistId].loadUri('spotify:track:' + trackId);
+        controllers[artistId].play();
+        currentArtist = artistId;
+        card.querySelectorAll('.track-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+}
+</script>
+</body></html>'''
+    
     return html
 
 
@@ -855,7 +977,7 @@ def main():
                     recs = generate_recommendations(df, selected_artists, features, effective_diversity, max_results)
                     st.session_state.recommendations = recs
                     st.session_state.last_params = params
-                    save_input_artists(selection_dict)
+                    save_search(selected_artists, selection_dict, recs)
                     st.rerun()
     
     recs = st.session_state.recommendations
