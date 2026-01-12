@@ -19,6 +19,21 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
+FEATURE_WEIGHTS = {
+    'popularity': 0.6,
+    'year': 0.8,
+    'duration_ms': 0.4,
+    'acousticness': 1.2,
+    'danceability': 1.2,
+    'energy': 1.2,
+    'valence': 1.2,
+    'instrumentalness': 1.2,
+    'speechiness': 1.0,
+    'loudness': 1.0,
+    'tempo': 1.0,
+    'liveness': 1.0,
+}
+
 # Clean styling and preconnect hints for faster embed loading
 st.html("""
 <link rel="preconnect" href="https://open.spotify.com">
@@ -473,7 +488,17 @@ def load_data():
     if not all(col in df.columns for col in required):
         st.error("Invalid data file")
         st.stop()
-    return df
+        
+    # Pre-compute weighted numeric matrix for spacing
+    numeric_df = df.select_dtypes(include=np.number).copy()
+    for col, weight in FEATURE_WEIGHTS.items():
+        if col in numeric_df.columns:
+            numeric_df[col] = numeric_df[col] * weight
+            
+    # Matrix for distance calculation
+    matrix = numeric_df.values.astype(np.float32)
+    
+    return df, matrix
 
 
 @st.cache_data
@@ -565,28 +590,9 @@ def save_search(input_artists, input_tracks_dict, recommendations):
         pass
 
 
-FEATURE_WEIGHTS = {
-    'popularity': 0.6,
-    'year': 0.8,
-    'duration_ms': 0.4,
-    'acousticness': 1.2,
-    'danceability': 1.2,
-    'energy': 1.2,
-    'valence': 1.2,
-    'instrumentalness': 1.2,
-    'speechiness': 1.0,
-    'loudness': 1.0,
-    'tempo': 1.0,
-    'liveness': 1.0,
-}
 
-@st.cache_data
-def get_numeric_matrix(_df):
-    numeric_df = _df.select_dtypes(include=np.number).copy()
-    for col, weight in FEATURE_WEIGHTS.items():
-        if col in numeric_df.columns:
-            numeric_df[col] = numeric_df[col] * weight
-    return numeric_df.values.astype(np.float32)
+
+
 
 
 def get_combined_features(df, artists, track_ids):
@@ -618,11 +624,10 @@ def get_combined_features(df, artists, track_ids):
     return weighted_vector.reshape(1, -1)
 
 
-def generate_recommendations(df, input_artists, features, diversity, max_artists):
+def generate_recommendations(df, matrix, input_artists, features, diversity, max_artists):
     n = 100 * diversity
     
-    numeric_matrix = get_numeric_matrix(df)
-    distances = cdist(features, numeric_matrix, metric="euclidean")[0]
+    distances = cdist(features, matrix, metric="euclidean")[0]
     similar_indices = distances.argsort()[:n]
     
     similar_songs = df.iloc[similar_indices].copy()
@@ -879,13 +884,27 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    df = load_data()
-    # Sort artists by popularity (most popular first)
-    artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
-    artists_list = artist_popularity.index.tolist()
 
     with st.sidebar:
-        
+        # Data Loading
+        if 'data_matrix' not in st.session_state:
+            # First load: Show status to indicate activity without blocking Hero
+            with st.spinner("Loading music library..."):
+                df, matrix = load_data()
+                # Sort artists by popularity (most popular first)
+                artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
+                artists_list = artist_popularity.index.tolist()
+                
+                # Cache in session state to skip sorting/loading on rerun
+                st.session_state.data_df = df
+                st.session_state.data_matrix = matrix
+                st.session_state.artists_list = artists_list
+        else:
+            # Hot path: Data already in session state
+            df = st.session_state.data_df
+            matrix = st.session_state.data_matrix
+            artists_list = st.session_state.artists_list
+            
         # Settings at top, collapsed by default
         with st.expander("Settings", expanded=False):
             default_max_results = st.session_state.get('setting_max_results', 6)
@@ -974,7 +993,7 @@ def main():
                     effective_diversity = diversity
                     if st.session_state.last_params == params:
                         effective_diversity = min(diversity + 2, 5)
-                    recs = generate_recommendations(df, selected_artists, features, effective_diversity, max_results)
+                    recs = generate_recommendations(df, matrix, selected_artists, features, effective_diversity, max_results)
                     st.session_state.recommendations = recs
                     st.session_state.last_params = params
                     save_search(selected_artists, selection_dict, recs)
