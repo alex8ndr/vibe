@@ -594,38 +594,40 @@ def save_search(input_artists, input_tracks_dict, recommendations):
         pass
 
 
-
-
-
-
-
-def get_combined_features(df, artists, track_ids):
-    all_features = []
+def get_combined_features(df, matrix, artists, track_ids):
+    """Look up the weighted features for selected artists/tracks from the matrix."""
+    all_vectors = []
     
-    if artists:
-        artist_features = df[df["artist_name"].isin(artists)].iloc[:, 3:].values
-        if artist_features.size > 0:
-            all_features.append(artist_features)
-    
-    if track_ids:
-        track_features = df[df["track_id"].isin(track_ids)].iloc[:, 3:].values
-        if track_features.size > 0:
-            all_features.append(track_features)
-    
-    if not all_features:
+    # helper to fetch vectors by mask
+    def get_vectors(mask):
+        # specific integer indices in the dataframe (alignment with matrix)
+        indices = np.where(mask)[0]
+        if len(indices) > 0:
+            return matrix[indices]
         return None
     
-    combined = np.concatenate(all_features, axis=0)
+    if artists:
+        # Find rows for these artists
+        mask = df["artist_name"].isin(artists)
+        vecs = get_vectors(mask)
+        if vecs is not None:
+            all_vectors.append(vecs)
+    
+    if track_ids:
+        # Find rows for these tracks
+        mask = df["track_id"].isin(track_ids)
+        vecs = get_vectors(mask)
+        if vecs is not None:
+            all_vectors.append(vecs)
+    
+    if not all_vectors:
+        return None
+    
+    # Stack all found vectors and compute the mean query vector
+    combined = np.concatenate(all_vectors, axis=0)
     avg_vector = np.mean(combined, axis=0)
     
-    # Apply weights to query vector
-    numeric_cols = df.select_dtypes(include=np.number).columns
-    weighted_vector = avg_vector.copy()
-    for i, col in enumerate(numeric_cols):
-        if col in FEATURE_WEIGHTS:
-            weighted_vector[i] *= FEATURE_WEIGHTS[col]
-            
-    return weighted_vector.reshape(1, -1)
+    return avg_vector.reshape(1, -1)
 
 
 def generate_recommendations(df, matrix, input_artists, features, diversity, max_artists):
@@ -825,8 +827,8 @@ def main():
         st.session_state.recommendations = {}
     if 'last_params' not in st.session_state:
         st.session_state.last_params = None
-    
-    # Load settings from query params (lightweight persistence)
+
+    # Load settings from query params
     if 'settings_loaded' not in st.session_state:
         st.session_state.settings_loaded = True
         params = st.query_params
@@ -903,7 +905,7 @@ def main():
             diversity = st.slider("Diversity", 1, 5, default_diversity, help="Higher = more variety", key="slider_diversity")
             columns = st.pills("Columns", ["Auto", "1", "2", "3"], default=default_columns, key="pills_columns")
             
-            # Track if settings changed for later persistence
+            # Track settings changes
             if max_results != st.session_state.get('setting_max_results'):
                 st.session_state.setting_max_results = max_results
                 st.session_state.settings_changed = True
@@ -955,8 +957,7 @@ def main():
                         ids = df[(df['artist_name'] == artist) & (df['track_name'].isin(chosen))]['track_id'].tolist()
                         selected_tracks.extend(ids)
 
-
-    # Main content
+    # Update query params after sidebar completes to avoid mid-render rerun
     if st.session_state.get('settings_changed'):
         st.query_params['max'] = str(st.session_state.get('setting_max_results', 6))
         st.query_params['div'] = str(st.session_state.get('setting_diversity', 2))
@@ -976,7 +977,7 @@ def main():
         
         if search:
             with st.spinner("Generating recommendations..."):
-                features = get_combined_features(df, selected_artists, selected_tracks)
+                features = get_combined_features(df, matrix, selected_artists, selected_tracks)
                 if features is not None:
                     effective_diversity = diversity
                     if st.session_state.last_params == params:
