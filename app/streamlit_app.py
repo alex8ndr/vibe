@@ -476,7 +476,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(show_spinner="Loading...")
+@st.cache_data(show_spinner="Loading music library...")
 def load_data():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     data_path = os.path.join(base_dir, '..', 'data', 'data_encoded.parquet')
@@ -489,7 +489,7 @@ def load_data():
         st.error("Invalid data file")
         st.stop()
         
-    # Pre-compute weighted numeric matrix for spacing
+    # Pre-compute weighted numeric matrix for distance calculation
     numeric_df = df.select_dtypes(include=np.number).copy()
     for col, weight in FEATURE_WEIGHTS.items():
         if col in numeric_df.columns:
@@ -498,7 +498,11 @@ def load_data():
     # Matrix for distance calculation
     matrix = numeric_df.values.astype(np.float32)
     
-    return df, matrix
+    # Sort artists by popularity (most popular first)
+    artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
+    artists_list = artist_popularity.index.tolist()
+    
+    return df, matrix, artists_list
 
 
 @st.cache_data
@@ -886,24 +890,8 @@ def main():
 
 
     with st.sidebar:
-        # Data Loading
-        if 'data_matrix' not in st.session_state:
-            # First load: Show status to indicate activity without blocking Hero
-            with st.spinner("Loading music library..."):
-                df, matrix = load_data()
-                # Sort artists by popularity (most popular first)
-                artist_popularity = df.groupby('artist_name')['popularity'].sum().sort_values(ascending=False)
-                artists_list = artist_popularity.index.tolist()
-                
-                # Cache in session state to skip sorting/loading on rerun
-                st.session_state.data_df = df
-                st.session_state.data_matrix = matrix
-                st.session_state.artists_list = artists_list
-        else:
-            # Hot path: Data already in session state
-            df = st.session_state.data_df
-            matrix = st.session_state.data_matrix
-            artists_list = st.session_state.artists_list
+        # Load data (cached)
+        df, matrix, artists_list = load_data()
             
         # Settings at top, collapsed by default
         with st.expander("Settings", expanded=False):
